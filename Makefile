@@ -1,7 +1,15 @@
-CFLAGS = -std=c11 -fPIC -D_GNU_SOURCE -flto -O2 -fvisibility=hidden -g -Wall -Wextra
-LDFLAGS = -Wl,--as-needed -flto -O2
+CFLAGS = -std=c11 -fPIC -D_GNU_SOURCE -fvisibility=hidden -Wall -Wextra
+LDFLAGS = -Wl,--as-needed
 LDLIBS = -lpthread
 OBJECTS = alloc.o bump.o chunk.o extent.o huge.o memory.o
+
+DEBUG ?= 0
+ifeq ($(DEBUG), 1)
+	CFLAGS += -Og -g
+else
+	CFLAGS += -flto -O2 -DNDEBUG
+	LDFLAGS += -flto -O2
+endif
 
 all: alloc.so test_small test_large test_huge
 
