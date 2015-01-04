@@ -128,12 +128,8 @@ static void thread_init(struct thread_cache *cache) {
     pthread_setspecific(tcache_key, cache);
 }
 
-static bool malloc_init(struct thread_cache *cache) {
-    if (likely(cache->arena_index != -1)) {
-        return false;
-    }
-
-    if (likely(atomic_load_explicit(&initialized, memory_order_consume))) {
+static bool malloc_init_slow(struct thread_cache *cache) {
+    if (atomic_load_explicit(&initialized, memory_order_consume)) {
         thread_init(cache);
         return false;
     }
@@ -178,6 +174,13 @@ static bool malloc_init(struct thread_cache *cache) {
     pthread_mutex_unlock(&init_mutex);
     thread_init(cache);
     return false;
+}
+
+static bool malloc_init(struct thread_cache *cache) {
+    if (likely(cache->arena_index != -1)) {
+        return false;
+    }
+    return malloc_init_slow(cache);
 }
 
 static struct arena *get_arena(struct thread_cache *cache) {
