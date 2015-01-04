@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -15,7 +16,6 @@
 #include "extent.h"
 #include "huge.h"
 #include "memory.h"
-#include "rb.h"
 #include "util.h"
 
 #ifndef thread_local
@@ -553,7 +553,7 @@ static size_t alloc_size(void *ptr) {
     return head->size;
 }
 
-void *malloc(size_t size) {
+EXPORT void *malloc(size_t size) {
     struct thread_cache *cache = &tcache;
 
     if (unlikely(malloc_init(cache))) {
@@ -568,7 +568,7 @@ void *malloc(size_t size) {
     return ptr;
 }
 
-void *calloc(size_t nmemb, size_t size) {
+EXPORT void *calloc(size_t nmemb, size_t size) {
     struct thread_cache *cache = &tcache;
 
     if (unlikely(malloc_init(cache))) {
@@ -623,7 +623,7 @@ static bool large_realloc_no_move(void *ptr, size_t old_size, size_t new_size) {
     return false;
 }
 
-void *realloc(void *ptr, size_t size) {
+EXPORT void *realloc(void *ptr, size_t size) {
     if (!ptr) {
         return malloc(size);
     }
@@ -668,31 +668,31 @@ void *realloc(void *ptr, size_t size) {
     return new_ptr;
 }
 
-void free(void *ptr) {
+EXPORT void free(void *ptr) {
     struct thread_cache *cache = &tcache;
     deallocate(cache, ptr);
 }
 
-int posix_memalign(UNUSED void **memptr, UNUSED size_t alignment, UNUSED size_t size) {
+EXPORT int posix_memalign(UNUSED void **memptr, UNUSED size_t alignment, UNUSED size_t size) {
     abort();
 }
 
-void *aligned_alloc(UNUSED size_t alignment, UNUSED size_t size) {
+EXPORT void *aligned_alloc(UNUSED size_t alignment, UNUSED size_t size) {
     abort();
 }
 
-void *valloc(UNUSED size_t size) {
+EXPORT void *valloc(UNUSED size_t size) {
     abort();
 }
 
-void *memalign(UNUSED size_t alignment, UNUSED size_t size) {
+EXPORT void *memalign(UNUSED size_t alignment, UNUSED size_t size) {
     abort();
 }
 
-void *pvalloc(UNUSED size_t size) {
+EXPORT void *pvalloc(UNUSED size_t size) {
     abort();
 }
 
-size_t malloc_usable_size(void *ptr) {
+EXPORT size_t malloc_usable_size(void *ptr) {
     return alloc_size(ptr);
 }

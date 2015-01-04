@@ -1,4 +1,4 @@
-CFLAGS = -std=c11 -fPIC -D_GNU_SOURCE -flto -O2 -g -Wall -Wextra
+CFLAGS = -std=c11 -fPIC -D_GNU_SOURCE -flto -O2 -fvisibility=hidden -g -Wall -Wextra
 LDFLAGS = -Wl,--as-needed -flto -O2
 LDLIBS = -lpthread
 OBJECTS = alloc.o bump.o chunk.o extent.o huge.o memory.o
