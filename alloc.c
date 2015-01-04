@@ -443,6 +443,40 @@ static void *allocate_large(struct thread_cache *cache, void *new_addr, size_t s
     return head->data;
 }
 
+static bool large_realloc_no_move(void *ptr, size_t old_size, size_t new_size) {
+    struct chunk *chunk = CHUNK_ADDR2BASE(ptr);
+    assert(!chunk->small);
+    struct arena *arena = &arenas[chunk->arena];
+    struct large *head = (struct large *)((char *)ptr - sizeof(struct large));
+
+    if (old_size < new_size) {
+        void *expand_addr = (char *)ptr + old_size;
+        size_t expand_size = new_size - old_size;
+
+        pthread_mutex_lock(&arena->mutex);
+        void *trail = large_recycle(arena, expand_addr, expand_size, MIN_ALIGN);
+        if (!trail) {
+            pthread_mutex_unlock(&arena->mutex);
+            return true;
+        }
+        assert(trail == expand_addr);
+        head->size = new_size;
+        pthread_mutex_unlock(&arena->mutex);
+        return false;
+    }
+    assert(new_size < old_size);
+
+    void *excess_addr = (char *)ptr + new_size;
+    size_t excess_size = old_size - new_size;
+    head->size = new_size;
+
+    pthread_mutex_lock(&arena->mutex);
+    large_free(arena, excess_addr, excess_size);
+    pthread_mutex_unlock(&arena->mutex);
+
+    return false;
+}
+
 static void *allocate(struct thread_cache *cache, size_t size) {
     if (size <= MAX_SMALL) {
         size_t real_size = (size + 15) & ~15;
@@ -587,40 +621,6 @@ EXPORT void *calloc(size_t nmemb, size_t size) {
     }
     memset(new_ptr, 0, total);
     return new_ptr;
-}
-
-static bool large_realloc_no_move(void *ptr, size_t old_size, size_t new_size) {
-    struct chunk *chunk = CHUNK_ADDR2BASE(ptr);
-    assert(!chunk->small);
-    struct arena *arena = &arenas[chunk->arena];
-    struct large *head = (struct large *)((char *)ptr - sizeof(struct large));
-
-    if (old_size < new_size) {
-        void *expand_addr = (char *)ptr + old_size;
-        size_t expand_size = new_size - old_size;
-
-        pthread_mutex_lock(&arena->mutex);
-        void *trail = large_recycle(arena, expand_addr, expand_size, MIN_ALIGN);
-        if (!trail) {
-            pthread_mutex_unlock(&arena->mutex);
-            return true;
-        }
-        assert(trail == expand_addr);
-        head->size = new_size;
-        pthread_mutex_unlock(&arena->mutex);
-        return false;
-    }
-    assert(new_size < old_size);
-
-    void *excess_addr = (char *)ptr + new_size;
-    size_t excess_size = old_size - new_size;
-    head->size = new_size;
-
-    pthread_mutex_lock(&arena->mutex);
-    large_free(arena, excess_addr, excess_size);
-    pthread_mutex_unlock(&arena->mutex);
-
-    return false;
 }
 
 EXPORT void *realloc(void *ptr, size_t size) {
