@@ -116,25 +116,25 @@ static void tcache_destroy(void *key) {
     cache->dead = true;
 }
 
-static void pick_arena() {
-    tcache.arena_index = sched_getcpu();
-    if (tcache.arena_index == -1 || tcache.arena_index > n_arenas_init) {
-        tcache.arena_index = 0;
+static void pick_arena(struct thread_cache *cache) {
+    cache->arena_index = sched_getcpu();
+    if (cache->arena_index == -1 || cache->arena_index > n_arenas_init) {
+        cache->arena_index = 0;
     }
 }
 
-static void thread_init() {
-    pick_arena();
-    pthread_setspecific(tcache_key, &tcache);
+static void thread_init(struct thread_cache *cache) {
+    pick_arena(cache);
+    pthread_setspecific(tcache_key, cache);
 }
 
-static bool malloc_init() {
-    if (tcache.arena_index != -1) {
+static bool malloc_init(struct thread_cache *cache) {
+    if (likely(cache->arena_index != -1)) {
         return false;
     }
 
     if (likely(atomic_load_explicit(&initialized, memory_order_consume))) {
-        thread_init();
+        thread_init(cache);
         return false;
     }
 
@@ -142,7 +142,7 @@ static bool malloc_init() {
 
     if (atomic_load_explicit(&initialized, memory_order_consume)) {
         pthread_mutex_unlock(&init_mutex);
-        thread_init();
+        thread_init(cache);
         return false;
     }
 
@@ -176,16 +176,16 @@ static bool malloc_init() {
     atomic_store_explicit(&initialized, true, memory_order_release);
 
     pthread_mutex_unlock(&init_mutex);
-    thread_init();
+    thread_init(cache);
     return false;
 }
 
-static struct arena *get_arena(void) {
-    if (pthread_mutex_trylock(&arenas[tcache.arena_index].mutex)) {
-        pick_arena();
-        pthread_mutex_lock(&arenas[tcache.arena_index].mutex);
+static struct arena *get_arena(struct thread_cache *cache) {
+    if (pthread_mutex_trylock(&arenas[cache->arena_index].mutex)) {
+        pick_arena(cache);
+        pthread_mutex_lock(&arenas[cache->arena_index].mutex);
     }
-    return &arenas[tcache.arena_index];
+    return &arenas[cache->arena_index];
 }
 
 static void *slab_first_alloc(struct slab *slab, size_t size) {
@@ -221,7 +221,7 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
         if (!chunk) {
             return NULL;
         }
-        chunk->arena = tcache.arena_index;
+        chunk->arena = arena - arenas;
         chunk->small = true;
 
         struct slab *slab = (struct slab *)ALIGNMENT_CEILING((uintptr_t)chunk->data, SLAB_SIZE);
@@ -265,36 +265,36 @@ static void slab_deallocate(struct arena *arena, struct slab *slab, struct slot 
     }
 }
 
-static void *allocate_small(size_t size) {
+static void *allocate_small(struct thread_cache *cache, size_t size) {
     size_t bin = size2bin(size);
-    struct slot *slot = tcache.bin[bin];
+    struct slot *slot = cache->bin[bin];
 
-    if (unlikely(tcache.dead)) {
-        struct arena *arena = get_arena();
+    if (unlikely(cache->dead)) {
+        struct arena *arena = get_arena(cache);
         void *ptr = slab_allocate(arena, size, bin);
         pthread_mutex_unlock(&arena->mutex);
         return ptr;
     }
 
     if (slot) {
-        tcache.bin[bin] = slot->next;
-        tcache.bin_size[bin] -= size;
+        cache->bin[bin] = slot->next;
+        cache->bin_size[bin] -= size;
         return slot;
     }
 
-    struct arena *arena = get_arena();
+    struct arena *arena = get_arena(cache);
 
     void *ptr = slab_allocate(arena, size, bin);
 
-    while (tcache.bin_size[bin] + size < CACHE_SIZE / 2) {
+    while (cache->bin_size[bin] + size < CACHE_SIZE / 2) {
         struct slot *slot = slab_allocate(arena, size, bin);
         if (!slot) {
             pthread_mutex_unlock(&arena->mutex);
             return ptr;
         }
-        slot->next = tcache.bin[bin];
-        tcache.bin[bin] = slot;
-        tcache.bin_size[bin] += size;
+        slot->next = cache->bin[bin];
+        cache->bin[bin] = slot;
+        cache->bin_size[bin] += size;
     }
 
     pthread_mutex_unlock(&arena->mutex);
@@ -409,8 +409,8 @@ static void *large_recycle(struct arena *arena, void *new_addr, size_t size, siz
     return ret;
 }
 
-static void *allocate_large(void *new_addr, size_t size) {
-    struct arena *arena = get_arena();
+static void *allocate_large(struct thread_cache *cache, void *new_addr, size_t size) {
+    struct arena *arena = get_arena(cache);
 
     void *ptr;
     if ((ptr = large_recycle(arena, new_addr, size + sizeof(struct large), MIN_ALIGN))) {
@@ -429,7 +429,7 @@ static void *allocate_large(void *new_addr, size_t size) {
         pthread_mutex_unlock(&arena->mutex);
         return NULL;
     }
-    chunk->arena = tcache.arena_index;
+    chunk->arena = cache->arena_index;
     chunk->small = false;
 
     struct large *head = (struct large *)((char *)chunk + sizeof(struct chunk));
@@ -443,27 +443,27 @@ static void *allocate_large(void *new_addr, size_t size) {
     return head->data;
 }
 
-static void *allocate(size_t size) {
+static void *allocate(struct thread_cache *cache, size_t size) {
     if (size <= MAX_SMALL) {
         size_t real_size = (size + 15) & ~15;
-        return allocate_small(real_size);
+        return allocate_small(cache, real_size);
     }
 
     if (size <= MAX_LARGE) {
         size_t real_size = (size + 15) & ~15;
-        return allocate_large(NULL, real_size);
+        return allocate_large(cache, NULL, real_size);
     }
 
     return huge_alloc(size);
 }
 
-static void deallocate_small(void *ptr) {
+static void deallocate_small(struct thread_cache *cache, void *ptr) {
     struct slot *slot = ptr;
     struct slab *slab = ALIGNMENT_ADDR2BASE(slot, SLAB_SIZE);
     size_t size = slab->size;
     size_t bin = size2bin(size);
 
-    if (unlikely(tcache.dead)) {
+    if (unlikely(cache->dead)) {
         struct chunk *chunk = CHUNK_ADDR2BASE(slot);
         struct arena *arena = &arenas[chunk->arena];
         pthread_mutex_lock(&arena->mutex);
@@ -472,16 +472,16 @@ static void deallocate_small(void *ptr) {
         return;
     }
 
-    slot->next = tcache.bin[bin];
-    tcache.bin[bin] = slot;
-    tcache.bin_size[bin] += size;
+    slot->next = cache->bin[bin];
+    cache->bin[bin] = slot;
+    cache->bin_size[bin] += size;
 
-    if (tcache.bin_size[bin] > CACHE_SIZE) {
-        tcache.bin_size[bin] = size;
-        while (tcache.bin_size[bin] < CACHE_SIZE / 2) {
+    if (cache->bin_size[bin] > CACHE_SIZE) {
+        cache->bin_size[bin] = size;
+        while (cache->bin_size[bin] < CACHE_SIZE / 2) {
             slot = slot->next;
             assert(slot);
-            tcache.bin_size[bin] += size;
+            cache->bin_size[bin] += size;
         }
 
         struct slot *flush = slot->next;
@@ -518,7 +518,7 @@ static void deallocate_small(void *ptr) {
     }
 }
 
-static void deallocate(void *ptr) {
+static void deallocate(struct thread_cache *cache, void *ptr) {
     struct chunk *chunk = CHUNK_ADDR2BASE(ptr);
     if (ptr == chunk) {
         if (!ptr) {
@@ -528,7 +528,7 @@ static void deallocate(void *ptr) {
         return;
     }
     if (chunk->small) {
-        deallocate_small(ptr);
+        deallocate_small(cache, ptr);
     } else {
         pthread_mutex_lock(&arenas[chunk->arena].mutex);
         struct large *head = (struct large *)((char *)ptr - sizeof(struct large));
@@ -554,11 +554,13 @@ static size_t alloc_size(void *ptr) {
 }
 
 void *malloc(size_t size) {
-    if (unlikely(malloc_init())) {
+    struct thread_cache *cache = &tcache;
+
+    if (unlikely(malloc_init(cache))) {
         return NULL;
     }
 
-    void *ptr = allocate(size);
+    void *ptr = allocate(cache, size);
     if (!ptr) {
         errno = ENOMEM;
         return NULL;
@@ -567,7 +569,9 @@ void *malloc(size_t size) {
 }
 
 void *calloc(size_t nmemb, size_t size) {
-    if (unlikely(malloc_init())) {
+    struct thread_cache *cache = &tcache;
+
+    if (unlikely(malloc_init(cache))) {
         return NULL;
     }
 
@@ -576,7 +580,7 @@ void *calloc(size_t nmemb, size_t size) {
         errno = ENOMEM;
         return NULL;
     }
-    void *new_ptr = allocate(total);
+    void *new_ptr = allocate(cache, total);
     if (!new_ptr) {
         errno = ENOMEM;
         return NULL;
@@ -624,12 +628,14 @@ void *realloc(void *ptr, size_t size) {
         return malloc(size);
     }
 
+    struct thread_cache *cache = &tcache;
+
     if (!size) {
-        deallocate(ptr);
+        deallocate(cache, ptr);
         return NULL;
     }
 
-    if (unlikely(malloc_init())) {
+    if (unlikely(malloc_init(cache))) {
         return NULL;
     }
 
@@ -651,19 +657,20 @@ void *realloc(void *ptr, size_t size) {
         }
     }
 
-    void *new_ptr = allocate(size);
+    void *new_ptr = allocate(cache, size);
     if (!new_ptr) {
         errno = ENOMEM;
         return NULL;
     }
     size_t copy_size = size < old_size ? size : old_size;
     memcpy(new_ptr, ptr, copy_size);
-    deallocate(ptr);
+    deallocate(cache, ptr);
     return new_ptr;
 }
 
 void free(void *ptr) {
-    deallocate(ptr);
+    struct thread_cache *cache = &tcache;
+    deallocate(cache, ptr);
 }
 
 int posix_memalign(UNUSED void **memptr, UNUSED size_t alignment, UNUSED size_t size) {
