@@ -77,6 +77,7 @@ struct thread_cache {
     bool dead;
 };
 
+__attribute__((tls_model("initial-exec")))
 static thread_local struct thread_cache tcache = {{NULL}, {}, -1, false};
 
 static void slab_deallocate(struct arena *arena, struct slab *slab, struct slot *ptr, size_t bin);
