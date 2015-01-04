@@ -69,15 +69,15 @@ static int n_arenas_init = 0;
 static int n_arenas = 0;
 
 static pthread_key_t tcache_key;
-static thread_local int arena_index = -1;
 
 struct thread_cache {
     struct slot *bin[N_CLASS];
     size_t bin_size[N_CLASS];
+    int arena_index;
     bool dead;
 };
 
-static thread_local struct thread_cache tcache;
+static thread_local struct thread_cache tcache = {{NULL}, {}, -1, false};
 
 static void slab_deallocate(struct arena *arena, struct slab *slab, struct slot *ptr, size_t bin);
 
@@ -116,9 +116,9 @@ static void tcache_destroy(void *key) {
 }
 
 static void pick_arena() {
-    arena_index = sched_getcpu();
-    if (arena_index == -1 || arena_index > n_arenas_init) {
-        arena_index = 0;
+    tcache.arena_index = sched_getcpu();
+    if (tcache.arena_index == -1 || tcache.arena_index > n_arenas_init) {
+        tcache.arena_index = 0;
     }
 }
 
@@ -128,7 +128,7 @@ static void thread_init() {
 }
 
 static bool malloc_init() {
-    if (arena_index != -1) {
+    if (tcache.arena_index != -1) {
         return false;
     }
 
@@ -180,11 +180,11 @@ static bool malloc_init() {
 }
 
 static struct arena *get_arena(void) {
-    if (pthread_mutex_trylock(&arenas[arena_index].mutex)) {
+    if (pthread_mutex_trylock(&arenas[tcache.arena_index].mutex)) {
         pick_arena();
-        pthread_mutex_lock(&arenas[arena_index].mutex);
+        pthread_mutex_lock(&arenas[tcache.arena_index].mutex);
     }
-    return &arenas[arena_index];
+    return &arenas[tcache.arena_index];
 }
 
 static void *slab_first_alloc(struct slab *slab, size_t size) {
@@ -220,7 +220,7 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
         if (!chunk) {
             return NULL;
         }
-        chunk->arena = arena_index;
+        chunk->arena = tcache.arena_index;
         chunk->small = true;
 
         struct slab *slab = (struct slab *)ALIGNMENT_CEILING((uintptr_t)chunk->data, SLAB_SIZE);
@@ -428,7 +428,7 @@ static void *allocate_large(void *new_addr, size_t size) {
         pthread_mutex_unlock(&arena->mutex);
         return NULL;
     }
-    chunk->arena = arena_index;
+    chunk->arena = tcache.arena_index;
     chunk->small = false;
 
     struct large *head = (struct large *)((char *)chunk + sizeof(struct chunk));
