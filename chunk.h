@@ -13,7 +13,7 @@
 #define CHUNK_ADDR2BASE(a) ((void *)((uintptr_t)(a) & ~CHUNK_MASK))
 
 void chunk_init(void);
-void *chunk_alloc(void *new_addr, size_t size);
+void *chunk_alloc(void *new_addr, size_t size, size_t alignment);
 void chunk_free(void *chunk, size_t size);
 
 #endif

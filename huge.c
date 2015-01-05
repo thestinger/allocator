@@ -12,14 +12,14 @@ void huge_init(void) {
     extent_tree_ad_new(&huge);
 }
 
-void *huge_alloc(size_t size) {
+void *huge_alloc(size_t size, size_t alignment) {
     size_t real_size = CHUNK_CEILING(size);
     struct extent_node *node = node_alloc();
     if (!node) {
         return NULL;
     }
     node->size = real_size;
-    node->addr = chunk_alloc(NULL, real_size);
+    node->addr = chunk_alloc(NULL, real_size, alignment);
     if (!node->addr) {
         node_free(node);
         return NULL;
@@ -60,7 +60,7 @@ static bool huge_no_move_expand(void *ptr, size_t old_size, size_t new_size) {
     void *expand_addr = (char *)ptr + old_size;
     size_t expand_size = new_size - old_size;
 
-    void *trail = chunk_alloc(expand_addr, expand_size);
+    void *trail = chunk_alloc(expand_addr, expand_size, CHUNK_SIZE);
     if (!trail) {
         return true;
     }
@@ -74,7 +74,7 @@ static bool huge_no_move_expand(void *ptr, size_t old_size, size_t new_size) {
 }
 
 static void *huge_remap_expand(void *old_addr, size_t old_size, size_t new_size) {
-    void *new_addr = chunk_alloc(NULL, new_size);
+    void *new_addr = chunk_alloc(NULL, new_size, CHUNK_SIZE);
     if (!new_addr) {
         return NULL;
     }

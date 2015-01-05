@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -220,7 +221,7 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
             return slab_first_alloc(slab, size);
         }
 
-        struct chunk *chunk = chunk_alloc(NULL, CHUNK_SIZE);
+        struct chunk *chunk = chunk_alloc(NULL, CHUNK_SIZE, CHUNK_SIZE);
         if (!chunk) {
             return NULL;
         }
@@ -427,7 +428,7 @@ static void *allocate_large(struct thread_cache *cache, void *new_addr, size_t s
         return NULL;
     }
 
-    struct chunk *chunk = chunk_alloc(NULL, CHUNK_SIZE);
+    struct chunk *chunk = chunk_alloc(NULL, CHUNK_SIZE, CHUNK_SIZE);
     if (!chunk) {
         pthread_mutex_unlock(&arena->mutex);
         return NULL;
@@ -491,7 +492,7 @@ static void *allocate(struct thread_cache *cache, size_t size) {
         return allocate_large(cache, NULL, real_size);
     }
 
-    return huge_alloc(size);
+    return huge_alloc(size, CHUNK_SIZE);
 }
 
 static void deallocate_small(struct thread_cache *cache, void *ptr) {
@@ -590,6 +591,56 @@ static size_t alloc_size(void *ptr) {
     return head->size;
 }
 
+static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t min_alignment) {
+    assert(min_alignment != 0);
+
+    struct thread_cache *cache = &tcache;
+
+    if (unlikely(malloc_init(cache))) {
+        return ENOMEM;
+    }
+
+    if (unlikely((alignment - 1) & alignment || alignment < min_alignment)) {
+        return EINVAL;
+    }
+
+    if (alignment <= MIN_ALIGN) {
+        void *ptr = allocate(cache, size);
+        if (!ptr) {
+            return ENOMEM;
+        }
+        *memptr = ptr;
+        return 0;
+    }
+
+    size_t worst_large_size = size + alignment - MIN_ALIGN;
+    if (unlikely(worst_large_size < size)) {
+        return ENOMEM;
+    }
+
+    if (worst_large_size < MAX_LARGE) {
+        fputs("non-huge aligned allocations not yet implemented\n", stderr);
+        abort();
+    }
+
+    void *ptr = huge_alloc(size, CHUNK_CEILING(alignment));
+    if (!ptr) {
+        return ENOMEM;
+    }
+    *memptr = ptr;
+    return 0;
+}
+
+static void *alloc_aligned_simple(size_t alignment, size_t size) {
+    void *ptr;
+    int ret = alloc_aligned(&ptr, alignment, size, 1);
+    if (unlikely(ret)) {
+        errno = ret;
+        return NULL;
+    }
+    return ptr;
+}
+
 EXPORT void *malloc(size_t size) {
     struct thread_cache *cache = &tcache;
 
@@ -676,24 +727,30 @@ EXPORT void free(void *ptr) {
     deallocate(cache, ptr);
 }
 
-EXPORT int posix_memalign(UNUSED void **memptr, UNUSED size_t alignment, UNUSED size_t size) {
-    abort();
+EXPORT int posix_memalign(void **memptr, size_t alignment, size_t size) {
+    return alloc_aligned(memptr, alignment, size, sizeof(void *));
 }
 
-EXPORT void *aligned_alloc(UNUSED size_t alignment, UNUSED size_t size) {
-    abort();
+EXPORT void *aligned_alloc(size_t alignment, size_t size) {
+    assert(size / alignment * alignment == size);
+    return alloc_aligned_simple(alignment, size);
 }
 
-EXPORT void *valloc(UNUSED size_t size) {
-    abort();
+EXPORT void *memalign(size_t alignment, size_t size) {
+    return alloc_aligned_simple(alignment, size);
 }
 
-EXPORT void *memalign(UNUSED size_t alignment, UNUSED size_t size) {
-    abort();
+EXPORT void *valloc(size_t size) {
+    return alloc_aligned_simple(PAGE_SIZE, size);
 }
 
-EXPORT void *pvalloc(UNUSED size_t size) {
-    abort();
+EXPORT void *pvalloc(size_t size) {
+    size_t rounded = PAGE_CEILING(size);
+    if (unlikely(!rounded)) {
+        errno = EINVAL;
+        return NULL;
+    }
+    return alloc_aligned_simple(PAGE_SIZE, rounded);
 }
 
 EXPORT size_t malloc_usable_size(void *ptr) {

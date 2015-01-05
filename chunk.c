@@ -124,9 +124,9 @@ static void *chunk_recycle(void *new_addr, size_t size, size_t alignment) {
     return ret;
 }
 
-void *chunk_alloc(void *new_addr, size_t size) {
+void *chunk_alloc(void *new_addr, size_t size, size_t alignment) {
     void *ptr;
-    if ((ptr = chunk_recycle(new_addr, size, CHUNK_SIZE))) {
+    if ((ptr = chunk_recycle(new_addr, size, alignment))) {
         return ptr;
     }
     if (new_addr) {
@@ -135,9 +135,9 @@ void *chunk_alloc(void *new_addr, size_t size) {
     if (!(ptr = memory_map(NULL, size))) {
         return NULL;
     }
-    if (ALIGNMENT_ADDR2OFFSET(ptr, CHUNK_SIZE)) {
+    if (ALIGNMENT_ADDR2OFFSET(ptr, alignment)) {
         memory_unmap(ptr, size);
-        return memory_map_aligned(NULL, size, CHUNK_SIZE);
+        return memory_map_aligned(NULL, size, alignment);
     }
     return ptr;
 }
