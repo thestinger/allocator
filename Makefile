@@ -20,11 +20,11 @@ test_small: test_small.c $(OBJECTS)
 test_large: test_large.c $(OBJECTS)
 test_huge: test_huge.c $(OBJECTS)
 
-alloc.o: alloc.c bump.h chunk.h huge.h memory.h rb.h
+alloc.o: alloc.c bump.h chunk.h chunk.h huge.h memory.h util.h
 bump.o: bump.c bump.h chunk.h memory.h
 chunk.o: chunk.c chunk.h extent.h memory.h
-extent.o: extent.c extent.h
-huge.o: huge.c huge.h chunk.h memory.h
+extent.o: extent.c bump.h extent.h
+huge.o: huge.c chunk.h huge.h memory.h
 memory.o: memory.c memory.h
 
 .PHONY: all
