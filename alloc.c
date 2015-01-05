@@ -454,13 +454,15 @@ static void *allocate_large(struct thread_cache *cache, size_t size, size_t alig
     return head->data;
 }
 
-static void *large_expand_recycle(struct arena *arena, void *new_addr, size_t size) {
+static bool large_expand_recycle(struct arena *arena, void *new_addr, size_t size) {
+    assert(new_addr);
+
     struct extent_node key;
     key.addr = new_addr;
     key.size = size;
     struct extent_node *node = extent_tree_szad_nsearch(&arena->large_size_addr, &key);
-    if (!node || (new_addr && node->addr != new_addr)) {
-        return NULL;
+    if (!node || node->addr != new_addr) {
+        return true;
     }
     assert(ALIGNMENT_ADDR2BASE(node->addr, MIN_ALIGN) == node->addr);
     assert(node->size >= size);
@@ -481,7 +483,7 @@ static void *large_expand_recycle(struct arena *arena, void *new_addr, size_t si
         slab_node_free(arena, node);
     }
 
-    return ret;
+    return false;
 }
 
 static bool large_realloc_no_move(void *ptr, size_t old_size, size_t new_size) {
@@ -495,12 +497,10 @@ static bool large_realloc_no_move(void *ptr, size_t old_size, size_t new_size) {
         size_t expand_size = new_size - old_size;
 
         pthread_mutex_lock(&arena->mutex);
-        void *trail = large_expand_recycle(arena, expand_addr, expand_size);
-        if (!trail) {
+        if (large_expand_recycle(arena, expand_addr, expand_size)) {
             pthread_mutex_unlock(&arena->mutex);
             return true;
         }
-        assert(trail == expand_addr);
         head->size = new_size;
         pthread_mutex_unlock(&arena->mutex);
         return false;
