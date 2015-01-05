@@ -686,6 +686,7 @@ EXPORT void *malloc(size_t size) {
     struct thread_cache *cache = &tcache;
 
     if (unlikely(malloc_init(cache))) {
+        errno = ENOMEM;
         return NULL;
     }
 
@@ -701,6 +702,7 @@ EXPORT void *calloc(size_t nmemb, size_t size) {
     struct thread_cache *cache = &tcache;
 
     if (unlikely(malloc_init(cache))) {
+        errno = ENOMEM;
         return NULL;
     }
 
@@ -731,6 +733,7 @@ EXPORT void *realloc(void *ptr, size_t size) {
     }
 
     if (unlikely(malloc_init(cache))) {
+        errno = ENOMEM;
         return NULL;
     }
 
@@ -764,8 +767,7 @@ EXPORT void *realloc(void *ptr, size_t size) {
 }
 
 EXPORT void free(void *ptr) {
-    struct thread_cache *cache = &tcache;
-    deallocate(cache, ptr);
+    deallocate(&tcache, ptr);
 }
 
 EXPORT int posix_memalign(void **memptr, size_t alignment, size_t size) {
