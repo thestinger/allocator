@@ -517,7 +517,7 @@ static bool large_realloc_no_move(void *ptr, size_t old_size, size_t new_size) {
     return false;
 }
 
-static void *allocate(struct thread_cache *cache, size_t size) {
+static inline void *allocate(struct thread_cache *cache, size_t size) {
     if (size <= MAX_SMALL) {
         size_t real_size = (size + 15) & ~15;
         return allocate_small(cache, real_size);
@@ -592,7 +592,7 @@ static void deallocate_small(struct thread_cache *cache, void *ptr) {
     }
 }
 
-static void deallocate(struct thread_cache *cache, void *ptr) {
+static inline void deallocate(struct thread_cache *cache, void *ptr) {
     struct chunk *chunk = CHUNK_ADDR2BASE(ptr);
     if (ptr == chunk) {
         if (!ptr) {

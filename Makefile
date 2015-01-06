@@ -24,7 +24,7 @@ alloc.o: alloc.c bump.h chunk.h chunk.h huge.h memory.h util.h
 bump.o: bump.c bump.h chunk.h memory.h
 chunk.o: chunk.c chunk.h extent.h memory.h
 extent.o: extent.c bump.h extent.h
-huge.o: huge.c chunk.h huge.h memory.h
+huge.o: huge.c chunk.h huge.h memory.h util.h
 memory.o: memory.c memory.h
 
 .PHONY: all
