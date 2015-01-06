@@ -61,11 +61,11 @@ struct arena {
     extent_tree large_size_addr;
 };
 
+static bool init_failed = false;
 static atomic_bool initialized = ATOMIC_VAR_INIT(false);
 static pthread_mutex_t init_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static struct arena *arenas;
-static int n_arenas_init = 0;
 static int n_arenas = 0;
 
 static pthread_key_t tcache_key;
@@ -118,7 +118,7 @@ static void tcache_destroy(void *key) {
 
 static void pick_arena(struct thread_cache *cache) {
     cache->arena_index = sched_getcpu();
-    if (cache->arena_index == -1 || cache->arena_index > n_arenas_init) {
+    if (unlikely(cache->arena_index == -1 || cache->arena_index > n_arenas)) {
         cache->arena_index = 0;
     }
 }
@@ -142,24 +142,28 @@ static bool malloc_init_slow(struct thread_cache *cache) {
         return false;
     }
 
-    if (!arenas) {
-        n_arenas = get_nprocs();
-        arenas = bump_alloc(sizeof(struct arena) * n_arenas);
+    if (unlikely(init_failed)) {
+        return true;
     }
 
+    n_arenas = get_nprocs();
+    arenas = bump_alloc(sizeof(struct arena) * n_arenas);
     if (!arenas) {
+        init_failed = true;
         pthread_mutex_unlock(&init_mutex);
         return true;
     }
 
     if (pthread_key_create(&tcache_key, tcache_destroy)) {
+        init_failed = true;
         pthread_mutex_unlock(&init_mutex);
         return true;
     }
 
-    for (; n_arenas_init < n_arenas; n_arenas_init++) {
-        struct arena *arena = &arenas[n_arenas_init];
+    for (int i = 0; i < n_arenas; i++) {
+        struct arena *arena = &arenas[i];
         if (pthread_mutex_init(&arena->mutex, NULL)) {
+            init_failed = true;
             pthread_mutex_unlock(&init_mutex);
             return true;
         }
