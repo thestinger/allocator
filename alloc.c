@@ -279,7 +279,7 @@ static void *allocate_small(struct thread_cache *cache, size_t size) {
         return ptr;
     }
 
-    if (slot) {
+    if (likely(slot)) {
         cache->bin[bin] = slot->next;
         cache->bin_size[bin] -= size;
         return slot;
@@ -550,7 +550,7 @@ static void deallocate_small(struct thread_cache *cache, void *ptr) {
     cache->bin[bin] = slot;
     cache->bin_size[bin] += size;
 
-    if (cache->bin_size[bin] > CACHE_SIZE) {
+    if (unlikely(cache->bin_size[bin] > CACHE_SIZE)) {
         cache->bin_size[bin] = size;
         while (cache->bin_size[bin] < CACHE_SIZE / 2) {
             slot = slot->next;
