@@ -1,6 +1,7 @@
 #include <stdlib.h>
 
 #include "chunk.h"
+#include "memory.h"
 
 int main(void) {
     // mmap(NULL, CHUNK_SIZE * 4, ...)
@@ -9,7 +10,11 @@ int main(void) {
 
     {
         // no change to the allocation
-        void *q = realloc(p, CHUNK_SIZE * 4 - (CHUNK_SIZE / 2));
+        void *q = realloc(p, CHUNK_SIZE * 4);
+        if (q != p) return 1;
+
+        // no change to the allocation
+        q = realloc(p, CHUNK_SIZE * 4 - (CHUNK_SIZE / 2));
         if (q != p) return 1;
 
         // in-place shrink, madvise purge

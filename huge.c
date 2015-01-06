@@ -118,8 +118,9 @@ void *huge_realloc(void *ptr, size_t old_size, size_t new_real_size) {
             return ptr;
         }
         return huge_remap_expand(ptr, old_size, new_real_size);
+    } else if (new_real_size < old_size) {
+        huge_no_move_shrink(ptr, old_size, new_real_size);
     }
-    huge_no_move_shrink(ptr, old_size, new_real_size);
     return ptr;
 }
 
