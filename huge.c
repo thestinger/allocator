@@ -45,6 +45,7 @@ static void huge_no_move_shrink(void *ptr, size_t old_size, size_t new_size) {
     void *excess_addr = (char *)node->addr + new_size;
     size_t excess_size = old_size - new_size;
 
+    memory_purge(excess_addr, excess_size);
     chunk_free(excess_addr, excess_size);
 }
 
@@ -132,6 +133,7 @@ void huge_free(void *ptr) {
     extent_tree_ad_remove(&huge, node);
     pthread_mutex_unlock(&huge_mutex);
 
+    memory_purge(ptr, node->size);
     chunk_free(ptr, node->size);
     node_free(node);
 }

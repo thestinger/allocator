@@ -15,8 +15,6 @@ void chunk_init(void) {
 }
 
 void chunk_free(void *chunk, size_t size) {
-    memory_purge(chunk, size);
-
     pthread_mutex_lock(&chunks_mutex);
     struct extent_node key;
     key.addr = (void *)((uintptr_t)chunk + size);
