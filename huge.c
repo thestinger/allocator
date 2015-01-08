@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <pthread.h>
 
 #include "chunk.h"
 #include "huge.h"

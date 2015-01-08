@@ -1,5 +1,3 @@
-#include <pthread.h>
-
 #include "bump.h"
 #include "extent.h"
 #include "mutex.h"

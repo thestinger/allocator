@@ -1,20 +1,19 @@
-#include <pthread.h>
-
 #include "bump.h"
 #include "chunk.h"
 #include "memory.h"
+#include "mutex.h"
 
-static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static mutex bump_mutex = MUTEX_INITIALIZER;
 static void *bump;
 static void *bump_end;
 
 void *bump_alloc(size_t size) {
-    pthread_mutex_lock(&mutex);
+    mutex_lock(&bump_mutex);
     if ((uintptr_t)bump + size > (uintptr_t)bump_end) {
         size_t chunk_size = CHUNK_CEILING(size);
         void *ptr = memory_map(NULL, chunk_size);
         if (!ptr) {
-            pthread_mutex_unlock(&mutex);
+            mutex_unlock(&bump_mutex);
             return NULL;
         }
         bump = ptr;
@@ -23,6 +22,6 @@ void *bump_alloc(size_t size) {
 
     void *ret = bump;
     bump = (void *)((char *)bump + size);
-    pthread_mutex_unlock(&mutex);
+    mutex_unlock(&bump_mutex);
     return ret;
 }
