@@ -4,9 +4,10 @@
 #include "chunk.h"
 #include "huge.h"
 #include "memory.h"
+#include "mutex.h"
 
 static extent_tree huge;
-static pthread_mutex_t huge_mutex = PTHREAD_MUTEX_INITIALIZER;
+static mutex huge_mutex = MUTEX_INITIALIZER;
 
 void huge_init(void) {
     extent_tree_ad_new(&huge);
@@ -25,9 +26,9 @@ void *huge_alloc(size_t size, size_t alignment) {
         return NULL;
     }
 
-    pthread_mutex_lock(&huge_mutex);
+    mutex_lock(&huge_mutex);
     extent_tree_ad_insert(&huge, node);
-    pthread_mutex_unlock(&huge_mutex);
+    mutex_unlock(&huge_mutex);
 
     return node->addr;
 }
@@ -36,11 +37,11 @@ static void huge_no_move_shrink(void *ptr, size_t old_size, size_t new_size) {
     struct extent_node key;
     key.addr = ptr;
 
-    pthread_mutex_lock(&huge_mutex);
+    mutex_lock(&huge_mutex);
     struct extent_node *node = extent_tree_ad_search(&huge, &key);
     assert(node);
     node->size = new_size;
-    pthread_mutex_unlock(&huge_mutex);
+    mutex_unlock(&huge_mutex);
 
     void *excess_addr = (char *)node->addr + new_size;
     size_t excess_size = old_size - new_size;
@@ -53,10 +54,10 @@ static bool huge_no_move_expand(void *ptr, size_t old_size, size_t new_size) {
     struct extent_node key;
     key.addr = ptr;
 
-    pthread_mutex_lock(&huge_mutex);
+    mutex_lock(&huge_mutex);
     struct extent_node *node = extent_tree_ad_search(&huge, &key);
     assert(node);
-    pthread_mutex_unlock(&huge_mutex);
+    mutex_unlock(&huge_mutex);
 
     void *expand_addr = (char *)ptr + old_size;
     size_t expand_size = new_size - old_size;
@@ -67,9 +68,9 @@ static bool huge_no_move_expand(void *ptr, size_t old_size, size_t new_size) {
     }
     assert(trail == expand_addr);
 
-    pthread_mutex_lock(&huge_mutex);
+    mutex_lock(&huge_mutex);
     node->size = new_size;
-    pthread_mutex_unlock(&huge_mutex);
+    mutex_unlock(&huge_mutex);
 
     return false;
 }
@@ -100,14 +101,14 @@ static void *huge_remap_expand(void *old_addr, size_t old_size, size_t new_size)
     struct extent_node key;
     key.addr = old_addr;
 
-    pthread_mutex_lock(&huge_mutex);
+    mutex_lock(&huge_mutex);
     struct extent_node *node = extent_tree_ad_search(&huge, &key);
     assert(node);
     extent_tree_ad_remove(&huge, node);
     node->addr = new_addr;
     node->size = new_size;
     extent_tree_ad_insert(&huge, node);
-    pthread_mutex_unlock(&huge_mutex);
+    mutex_unlock(&huge_mutex);
 
     return new_addr;
 }
@@ -128,11 +129,11 @@ void huge_free(void *ptr) {
     struct extent_node *node, key;
     key.addr = ptr;
 
-    pthread_mutex_lock(&huge_mutex);
+    mutex_lock(&huge_mutex);
     node = extent_tree_ad_search(&huge, &key);
     assert(node);
     extent_tree_ad_remove(&huge, node);
-    pthread_mutex_unlock(&huge_mutex);
+    mutex_unlock(&huge_mutex);
 
     memory_purge(ptr, node->size);
     chunk_free(ptr, node->size);
@@ -143,11 +144,11 @@ size_t huge_alloc_size(void *ptr) {
     struct extent_node key;
     key.addr = ptr;
 
-    pthread_mutex_lock(&huge_mutex);
+    mutex_lock(&huge_mutex);
     struct extent_node *node = extent_tree_ad_search(&huge, &key);
     assert(node);
     size_t size = node->size;
-    pthread_mutex_unlock(&huge_mutex);
+    mutex_unlock(&huge_mutex);
 
     return size;
 }

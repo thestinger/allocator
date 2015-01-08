@@ -16,6 +16,7 @@
 #include "extent.h"
 #include "huge.h"
 #include "memory.h"
+#include "mutex.h"
 #include "util.h"
 
 #ifndef thread_local
@@ -53,7 +54,7 @@ struct chunk {
 };
 
 struct arena {
-    pthread_mutex_t mutex;
+    mutex mutex;
     struct slab *free_slab;
     struct slab *partial_slab[N_CLASS];
 
@@ -63,7 +64,7 @@ struct arena {
 
 static bool init_failed = false;
 static atomic_bool initialized = ATOMIC_VAR_INIT(false);
-static pthread_mutex_t init_mutex = PTHREAD_MUTEX_INITIALIZER;
+static mutex init_mutex = MUTEX_INITIALIZER;
 
 static struct arena *arenas;
 static int n_arenas = 0;
@@ -97,7 +98,7 @@ static void tcache_destroy(void *key) {
                 assert(chunk->small);
                 if (chunk->arena == a) {
                     if (!locked) {
-                        pthread_mutex_lock(&arena->mutex);
+                        mutex_lock(&arena->mutex);
                         locked = true;
                     }
                     struct slab *slab = ALIGNMENT_ADDR2BASE(slot, SLAB_SIZE);
@@ -110,7 +111,7 @@ static void tcache_destroy(void *key) {
             }
         }
         if (locked) {
-            pthread_mutex_unlock(&arena->mutex);
+            mutex_unlock(&arena->mutex);
         }
     }
     cache->dead = true;
@@ -134,10 +135,10 @@ static bool malloc_init_slow(struct thread_cache *cache) {
         return false;
     }
 
-    pthread_mutex_lock(&init_mutex);
+    mutex_lock(&init_mutex);
 
     if (atomic_load_explicit(&initialized, memory_order_consume)) {
-        pthread_mutex_unlock(&init_mutex);
+        mutex_unlock(&init_mutex);
         thread_init(cache);
         return false;
     }
@@ -150,21 +151,21 @@ static bool malloc_init_slow(struct thread_cache *cache) {
     arenas = bump_alloc(sizeof(struct arena) * n_arenas);
     if (!arenas) {
         init_failed = true;
-        pthread_mutex_unlock(&init_mutex);
+        mutex_unlock(&init_mutex);
         return true;
     }
 
     if (pthread_key_create(&tcache_key, tcache_destroy)) {
         init_failed = true;
-        pthread_mutex_unlock(&init_mutex);
+        mutex_unlock(&init_mutex);
         return true;
     }
 
     for (int i = 0; i < n_arenas; i++) {
         struct arena *arena = &arenas[i];
-        if (pthread_mutex_init(&arena->mutex, NULL)) {
+        if (mutex_init(&arena->mutex)) {
             init_failed = true;
-            pthread_mutex_unlock(&init_mutex);
+            mutex_unlock(&init_mutex);
             return true;
         }
         extent_tree_ad_new(&arena->large_addr);
@@ -175,7 +176,7 @@ static bool malloc_init_slow(struct thread_cache *cache) {
     chunk_init();
     atomic_store_explicit(&initialized, true, memory_order_release);
 
-    pthread_mutex_unlock(&init_mutex);
+    mutex_unlock(&init_mutex);
     thread_init(cache);
     return false;
 }
@@ -188,9 +189,9 @@ static bool malloc_init(struct thread_cache *cache) {
 }
 
 static struct arena *get_arena(struct thread_cache *cache) {
-    if (pthread_mutex_trylock(&arenas[cache->arena_index].mutex)) {
+    if (mutex_trylock(&arenas[cache->arena_index].mutex)) {
         pick_arena(cache);
-        pthread_mutex_lock(&arenas[cache->arena_index].mutex);
+        mutex_lock(&arenas[cache->arena_index].mutex);
     }
     return &arenas[cache->arena_index];
 }
@@ -279,7 +280,7 @@ static void *allocate_small(struct thread_cache *cache, size_t size) {
     if (unlikely(cache->dead)) {
         struct arena *arena = get_arena(cache);
         void *ptr = slab_allocate(arena, size, bin);
-        pthread_mutex_unlock(&arena->mutex);
+        mutex_unlock(&arena->mutex);
         return ptr;
     }
 
@@ -296,7 +297,7 @@ static void *allocate_small(struct thread_cache *cache, size_t size) {
     while (cache->bin_size[bin] + size < CACHE_SIZE / 2) {
         struct slot *slot = slab_allocate(arena, size, bin);
         if (!slot) {
-            pthread_mutex_unlock(&arena->mutex);
+            mutex_unlock(&arena->mutex);
             return ptr;
         }
         slot->next = cache->bin[bin];
@@ -304,7 +305,7 @@ static void *allocate_small(struct thread_cache *cache, size_t size) {
         cache->bin_size[bin] += size;
     }
 
-    pthread_mutex_unlock(&arena->mutex);
+    mutex_unlock(&arena->mutex);
     return ptr;
 }
 
@@ -425,13 +426,13 @@ static void *allocate_large(struct thread_cache *cache, size_t size, size_t alig
 
     struct large *head = large_recycle(arena, size, alignment);
     if (head) {
-        pthread_mutex_unlock(&arena->mutex);
+        mutex_unlock(&arena->mutex);
         return head->data;
     }
 
     struct chunk *chunk = chunk_alloc(NULL, CHUNK_SIZE, CHUNK_SIZE);
     if (!chunk) {
-        pthread_mutex_unlock(&arena->mutex);
+        mutex_unlock(&arena->mutex);
         return NULL;
     }
     chunk->arena = cache->arena_index;
@@ -452,7 +453,7 @@ static void *allocate_large(struct thread_cache *cache, size_t size, size_t alig
     void *chunk_end = (char *)chunk + CHUNK_SIZE;
     large_free(arena, end, chunk_end - end);
 
-    pthread_mutex_unlock(&arena->mutex);
+    mutex_unlock(&arena->mutex);
 
     return head->data;
 }
@@ -499,13 +500,13 @@ static bool large_realloc_no_move(void *ptr, size_t old_size, size_t new_size) {
         void *expand_addr = (char *)ptr + old_size;
         size_t expand_size = new_size - old_size;
 
-        pthread_mutex_lock(&arena->mutex);
+        mutex_lock(&arena->mutex);
         if (large_expand_recycle(arena, expand_addr, expand_size)) {
-            pthread_mutex_unlock(&arena->mutex);
+            mutex_unlock(&arena->mutex);
             return true;
         }
         head->size = new_size;
-        pthread_mutex_unlock(&arena->mutex);
+        mutex_unlock(&arena->mutex);
         return false;
     }
     assert(new_size < old_size);
@@ -514,9 +515,9 @@ static bool large_realloc_no_move(void *ptr, size_t old_size, size_t new_size) {
     size_t excess_size = old_size - new_size;
     head->size = new_size;
 
-    pthread_mutex_lock(&arena->mutex);
+    mutex_lock(&arena->mutex);
     large_free(arena, excess_addr, excess_size);
-    pthread_mutex_unlock(&arena->mutex);
+    mutex_unlock(&arena->mutex);
 
     return false;
 }
@@ -544,9 +545,9 @@ static void deallocate_small(struct thread_cache *cache, void *ptr) {
     if (unlikely(cache->dead)) {
         struct chunk *chunk = CHUNK_ADDR2BASE(slot);
         struct arena *arena = &arenas[chunk->arena];
-        pthread_mutex_lock(&arena->mutex);
+        mutex_lock(&arena->mutex);
         slab_deallocate(arena, slab, slot, bin);
-        pthread_mutex_unlock(&arena->mutex);
+        mutex_unlock(&arena->mutex);
         return;
     }
 
@@ -578,7 +579,7 @@ static void deallocate_small(struct thread_cache *cache, void *ptr) {
                 assert(chunk->small);
                 if (chunk->arena == a) {
                     if (!locked) {
-                        pthread_mutex_lock(&arena->mutex);
+                        mutex_lock(&arena->mutex);
                         locked = true;
                     }
                     struct slab *slab = ALIGNMENT_ADDR2BASE(slot, SLAB_SIZE);
@@ -590,7 +591,7 @@ static void deallocate_small(struct thread_cache *cache, void *ptr) {
                 slot = next;
             }
             if (locked) {
-                pthread_mutex_unlock(&arena->mutex);
+                mutex_unlock(&arena->mutex);
             }
         }
     }
@@ -608,10 +609,10 @@ static inline void deallocate(struct thread_cache *cache, void *ptr) {
     if (chunk->small) {
         deallocate_small(cache, ptr);
     } else {
-        pthread_mutex_lock(&arenas[chunk->arena].mutex);
+        mutex_lock(&arenas[chunk->arena].mutex);
         struct large *head = (struct large *)((char *)ptr - sizeof(struct large));
         large_free(&arenas[chunk->arena], head, head->size + sizeof(struct large));
-        pthread_mutex_unlock(&arenas[chunk->arena].mutex);
+        mutex_unlock(&arenas[chunk->arena].mutex);
     }
 }
 

@@ -4,10 +4,11 @@
 #include "chunk.h"
 #include "extent.h"
 #include "memory.h"
+#include "mutex.h"
 
 static extent_tree chunks_addr;
 static extent_tree chunks_size_addr;
-static pthread_mutex_t chunks_mutex = PTHREAD_MUTEX_INITIALIZER;
+static mutex chunks_mutex = MUTEX_INITIALIZER;
 
 void chunk_init(void) {
     extent_tree_ad_new(&chunks_addr);
@@ -15,7 +16,7 @@ void chunk_init(void) {
 }
 
 void chunk_free(void *chunk, size_t size) {
-    pthread_mutex_lock(&chunks_mutex);
+    mutex_lock(&chunks_mutex);
     struct extent_node key;
     key.addr = (void *)((uintptr_t)chunk + size);
     struct extent_node *node = extent_tree_ad_nsearch(&chunks_addr, &key);
@@ -68,7 +69,7 @@ void chunk_free(void *chunk, size_t size) {
     }
 
 label_return:
-    pthread_mutex_unlock(&chunks_mutex);
+    mutex_unlock(&chunks_mutex);
 }
 
 static void *chunk_recycle(void *new_addr, size_t size, size_t alignment) {
@@ -79,10 +80,10 @@ static void *chunk_recycle(void *new_addr, size_t size, size_t alignment) {
     struct extent_node key;
     key.addr = new_addr;
     key.size = alloc_size;
-    pthread_mutex_lock(&chunks_mutex);
+    mutex_lock(&chunks_mutex);
     struct extent_node *node = extent_tree_szad_nsearch(&chunks_size_addr, &key);
     if (!node || (new_addr && node->addr != new_addr)) {
-        pthread_mutex_unlock(&chunks_mutex);
+        mutex_unlock(&chunks_mutex);
         return NULL;
     }
     size_t leadsize = ALIGNMENT_CEILING((uintptr_t)node->addr, alignment) - (uintptr_t)node->addr;
@@ -104,7 +105,7 @@ static void *chunk_recycle(void *new_addr, size_t size, size_t alignment) {
         if (!node) {
             node = node_alloc();
             if (!node) {
-                pthread_mutex_unlock(&chunks_mutex);
+                mutex_unlock(&chunks_mutex);
                 chunk_free(ret, size);
                 return NULL;
             }
@@ -115,7 +116,7 @@ static void *chunk_recycle(void *new_addr, size_t size, size_t alignment) {
         extent_tree_ad_insert(&chunks_addr, node);
         node = NULL;
     }
-    pthread_mutex_unlock(&chunks_mutex);
+    mutex_unlock(&chunks_mutex);
 
     if (node)
         node_free(node);
