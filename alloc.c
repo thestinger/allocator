@@ -566,34 +566,31 @@ static void deallocate_small(struct thread_cache *cache, void *ptr) {
         struct slot *flush = slot->next;
         slot->next = NULL;
 
-        for (int a = 0; a < n_arenas; a++) {
-            struct arena *arena = &arenas[a];
-
-            struct slot **last_next = &flush;
+        do {
             struct slot *slot = flush;
-            bool locked = false;
+            flush = NULL;
 
-            while (slot) {
+            int arena_index = ((struct chunk *)CHUNK_ADDR2BASE(slot))->arena;
+            struct arena *arena = &arenas[arena_index];
+            mutex_lock(&arena->mutex);
+            do {
                 struct slot *next = slot->next;
+
                 struct chunk *chunk = CHUNK_ADDR2BASE(slot);
                 assert(chunk->small);
-                if (chunk->arena == a) {
-                    if (!locked) {
-                        mutex_lock(&arena->mutex);
-                        locked = true;
-                    }
+                if (chunk->arena == arena_index) {
                     struct slab *slab = ALIGNMENT_ADDR2BASE(slot, SLAB_SIZE);
                     slab_deallocate(arena, slab, slot, bin);
-                    *last_next = next;
+                    slot = slot->next;
                 } else {
-                    last_next = &slot->next;
+                    slot->next = flush;
+                    flush = slot;
                 }
+
                 slot = next;
-            }
-            if (locked) {
-                mutex_unlock(&arena->mutex);
-            }
-        }
+            } while (slot);
+            mutex_unlock(&arena->mutex);
+        } while (flush);
     }
 }
 
