@@ -34,12 +34,8 @@ void chunk_free(void *chunk, size_t size) {
         node = node_alloc();
         /* Coalescing forward failed, so insert a new node. */
         if (!node) {
-            /*
-             * node_alloc() failed, which is an exceedingly
-             * unlikely failure.  Leak chunk; its pages have
-             * already been purged, so this is only a virtual
-             * memory leak.
-             */
+            // Failed to allocate an extent node, so just unmap the chunk(s).
+            memory_unmap(chunk, size);
             goto label_return;
         }
         node->addr = chunk;
