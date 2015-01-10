@@ -591,6 +591,9 @@ static void deallocate_small(struct thread_cache *cache, void *ptr) {
 }
 
 static inline void deallocate(struct thread_cache *cache, void *ptr) {
+    // malloc_init has been called if the pointer is non-NULL
+    assert(!ptr || atomic_load(&initialized));
+
     struct chunk *chunk = CHUNK_ADDR2BASE(ptr);
     if (ptr == chunk) {
         if (!ptr) {
@@ -610,6 +613,9 @@ static inline void deallocate(struct thread_cache *cache, void *ptr) {
 }
 
 static size_t alloc_size(void *ptr) {
+    // malloc_init has been called if the pointer is non-NULL
+    assert(!ptr || atomic_load(&initialized));
+
     struct chunk *chunk = CHUNK_ADDR2BASE(ptr);
     if (ptr == chunk) {
         if (!ptr) {
