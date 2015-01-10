@@ -2,6 +2,7 @@ CFLAGS = -std=c11 -fPIC -D_GNU_SOURCE -fvisibility=hidden -Wall -Wextra
 LDFLAGS = -Wl,--as-needed
 LDLIBS = -lpthread
 OBJECTS = alloc.o bump.o chunk.o extent.o huge.o memory.o mutex.o
+BINARIES = alloc.so test_small test_large test_huge
 
 DEBUG ?= 0
 ifeq ($(DEBUG), 1)
@@ -11,7 +12,7 @@ else
 	LDFLAGS += -flto -O2
 endif
 
-all: alloc.so test_small test_large test_huge
+all: $(BINARIES)
 
 alloc.so: $(OBJECTS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -shared $^ $(LDLIBS) -o $@
@@ -28,4 +29,7 @@ huge.o: huge.c chunk.h huge.h memory.h mutex.h util.h
 memory.o: memory.c memory.h
 mutex.o: mutex.c mutex.h util.h
 
-.PHONY: all
+clean:
+	rm -f $(OBJECTS) $(BINARIES)
+
+.PHONY: all clean
