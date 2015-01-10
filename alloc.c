@@ -243,16 +243,14 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
             arena->free_slab = slab;
         }
 
-        slab = arena->partial_slab[bin];
-
-        return slab_first_alloc(slab, size);
+        return slab_first_alloc(arena->partial_slab[bin], size);
     }
 
     struct slab *slab = arena->partial_slab[bin];
     struct slot *slot = slab->next_slot;
-    slab->next_slot = slab->next_slot->next;
+    slab->next_slot = slot->next;
     if (!slab->next_slot) {
-        arena->partial_slab[bin] = arena->partial_slab[bin]->next;
+        arena->partial_slab[bin] = slab->next;
     }
 
     return slot;
@@ -262,8 +260,7 @@ static size_t size2bin(size_t size) {
     return (size >> 4) - 1;
 }
 
-static void slab_deallocate(struct arena *arena, struct slab *slab, struct slot *ptr, size_t bin) {
-    struct slot *slot = ptr;
+static void slab_deallocate(struct arena *arena, struct slab *slab, struct slot *slot, size_t bin) {
     slot->next = slab->next_slot;
     slab->next_slot = slot;
 
@@ -275,7 +272,6 @@ static void slab_deallocate(struct arena *arena, struct slab *slab, struct slot 
 
 static void *allocate_small(struct thread_cache *cache, size_t size) {
     size_t bin = size2bin(size);
-    struct slot *slot = cache->bin[bin];
 
     if (unlikely(cache->dead)) {
         struct arena *arena = get_arena(cache);
@@ -284,6 +280,7 @@ static void *allocate_small(struct thread_cache *cache, size_t size) {
         return ptr;
     }
 
+    struct slot *slot = cache->bin[bin];
     if (likely(slot)) {
         cache->bin[bin] = slot->next;
         cache->bin_size[bin] -= size;
@@ -291,7 +288,6 @@ static void *allocate_small(struct thread_cache *cache, size_t size) {
     }
 
     struct arena *arena = get_arena(cache);
-
     void *ptr = slab_allocate(arena, size, bin);
 
     while (cache->bin_size[bin] + size < CACHE_SIZE / 2) {
