@@ -275,10 +275,15 @@ static void *allocate_small(struct thread_cache *cache, size_t size) {
     size_t bin = size2bin(size);
 
     if (unlikely(cache->dead)) {
-        struct arena *arena = get_arena(cache);
-        void *ptr = slab_allocate(arena, size, bin);
-        mutex_unlock(&arena->mutex);
-        return ptr;
+        if (cache->arena_index != -1) {
+            struct arena *arena = get_arena(cache);
+            void *ptr = slab_allocate(arena, size, bin);
+            mutex_unlock(&arena->mutex);
+            return ptr;
+        }
+        if (unlikely(malloc_init(cache))) {
+            return NULL;
+        }
     }
 
     struct slot *slot = cache->bin[bin];
@@ -525,6 +530,10 @@ static inline void *allocate(struct thread_cache *cache, size_t size) {
         return allocate_small(cache, real_size);
     }
 
+    if (unlikely(malloc_init(cache))) {
+        return NULL;
+    }
+
     if (size <= MAX_LARGE) {
         size_t real_size = (size + 15) & ~15;
         return allocate_large(cache, real_size, MIN_ALIGN);
@@ -640,10 +649,6 @@ static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t mi
 
     struct thread_cache *cache = &tcache;
 
-    if (unlikely(malloc_init(cache))) {
-        return ENOMEM;
-    }
-
     if (unlikely((alignment - 1) & alignment || alignment < min_alignment)) {
         return EINVAL;
     }
@@ -659,6 +664,10 @@ static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t mi
 
     size_t worst_large_size = size + alignment - MIN_ALIGN;
     if (unlikely(worst_large_size < size)) {
+        return ENOMEM;
+    }
+
+    if (unlikely(malloc_init(cache))) {
         return ENOMEM;
     }
 
@@ -692,11 +701,6 @@ static void *alloc_aligned_simple(size_t alignment, size_t size) {
 EXPORT void *malloc(size_t size) {
     struct thread_cache *cache = &tcache;
 
-    if (unlikely(malloc_init(cache))) {
-        errno = ENOMEM;
-        return NULL;
-    }
-
     void *ptr = allocate(cache, size);
     if (!ptr) {
         errno = ENOMEM;
@@ -707,11 +711,6 @@ EXPORT void *malloc(size_t size) {
 
 EXPORT void *calloc(size_t nmemb, size_t size) {
     struct thread_cache *cache = &tcache;
-
-    if (unlikely(malloc_init(cache))) {
-        errno = ENOMEM;
-        return NULL;
-    }
 
     size_t total;
     if (size_mul_overflow(nmemb, size, &total)) {
@@ -732,15 +731,13 @@ EXPORT void *realloc(void *ptr, size_t size) {
         return malloc(size);
     }
 
+    // malloc_init has been called
+    assert(atomic_load(&initialized));
+
     struct thread_cache *cache = &tcache;
 
     if (!size) {
         deallocate(cache, ptr);
-        return NULL;
-    }
-
-    if (unlikely(malloc_init(cache))) {
-        errno = ENOMEM;
         return NULL;
     }
 
