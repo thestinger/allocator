@@ -74,12 +74,12 @@ static pthread_key_t tcache_key;
 struct thread_cache {
     struct slot *bin[N_CLASS];
     size_t bin_size[N_CLASS];
-    int arena_index;
-    bool dead;
+    int arena_index; // -1 if uninitialized
+    bool dead; // true if destroyed or uninitialized
 };
 
 __attribute__((tls_model("initial-exec")))
-static thread_local struct thread_cache tcache = {{NULL}, {}, -1, false};
+static thread_local struct thread_cache tcache = {{NULL}, {}, -1, true};
 
 static void slab_deallocate(struct arena *arena, struct slab *slab, struct slot *ptr, size_t bin);
 
@@ -127,6 +127,7 @@ static void pick_arena(struct thread_cache *cache) {
 static void thread_init(struct thread_cache *cache) {
     pick_arena(cache);
     pthread_setspecific(tcache_key, cache);
+    cache->dead = false;
 }
 
 static bool malloc_init_slow(struct thread_cache *cache) {
@@ -539,12 +540,15 @@ static void deallocate_small(struct thread_cache *cache, void *ptr) {
     size_t bin = size2bin(size);
 
     if (unlikely(cache->dead)) {
-        struct chunk *chunk = CHUNK_ADDR2BASE(slot);
-        struct arena *arena = &arenas[chunk->arena];
-        mutex_lock(&arena->mutex);
-        slab_deallocate(arena, slab, slot, bin);
-        mutex_unlock(&arena->mutex);
-        return;
+        if (cache->arena_index != -1) {
+            struct chunk *chunk = CHUNK_ADDR2BASE(slot);
+            struct arena *arena = &arenas[chunk->arena];
+            mutex_lock(&arena->mutex);
+            slab_deallocate(arena, slab, slot, bin);
+            mutex_unlock(&arena->mutex);
+            return;
+        }
+        thread_init(cache);
     }
 
     slot->next = cache->bin[bin];
