@@ -44,6 +44,7 @@ struct slab {
     struct slab *next;
     size_t size;
     struct slot *next_slot;
+    struct slot *end;
     uint8_t data[];
 };
 
@@ -199,19 +200,10 @@ static struct arena *get_arena(struct thread_cache *cache) {
 
 static void *slab_first_alloc(struct slab *slab, size_t size) {
     slab->size = size;
-
-    struct slot *slot = (struct slot *)ALIGNMENT_CEILING((uintptr_t)slab->data, MIN_ALIGN);
-    void *ret = slot;
-    void *slab_end = (char *)slab + SLAB_SIZE;
-
-    slot = (struct slot *)((char *)slot + size);
-    while ((uintptr_t)slot + size < (uintptr_t)slab_end) {
-        slot->next = slab->next_slot;
-        slab->next_slot = slot;
-        slot = (struct slot *)((char *)slot + size);
-    }
-
-    return ret;
+    void *first = (void *)ALIGNMENT_CEILING((uintptr_t)slab->data, MIN_ALIGN);
+    slab->next_slot = (struct slot *)((char *)first + size);
+    slab->end = (struct slot *)((char *)slab->next_slot + size);
+    return first;
 }
 
 static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
@@ -251,7 +243,13 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
     struct slot *slot = slab->next_slot;
     slab->next_slot = slot->next;
     if (!slab->next_slot) {
-        arena->partial_slab[bin] = slab->next;
+        uintptr_t new_end = (uintptr_t)slab->end + size;
+        if (new_end > (uintptr_t)slab + SLAB_SIZE) {
+            arena->partial_slab[bin] = slab->next;
+        } else {
+            slab->next_slot = slab->end;
+            slab->end = (struct slot *)new_end;
+        }
     }
 
     return slot;
