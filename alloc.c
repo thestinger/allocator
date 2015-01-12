@@ -191,7 +191,7 @@ static bool malloc_init(struct thread_cache *cache) {
 }
 
 static struct arena *get_arena(struct thread_cache *cache) {
-    if (mutex_trylock(&arenas[cache->arena_index].mutex)) {
+    if (unlikely(mutex_trylock(&arenas[cache->arena_index].mutex))) {
         pick_arena(cache);
         mutex_lock(&arenas[cache->arena_index].mutex);
     }
@@ -219,7 +219,7 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
         }
 
         struct chunk *chunk = chunk_alloc(NULL, CHUNK_SIZE, CHUNK_SIZE);
-        if (!chunk) {
+        if (unlikely(!chunk)) {
             return NULL;
         }
         chunk->arena = arena - arenas;
@@ -431,7 +431,7 @@ static void *allocate_large(struct thread_cache *cache, size_t size, size_t alig
     }
 
     struct chunk *chunk = chunk_alloc(NULL, CHUNK_SIZE, CHUNK_SIZE);
-    if (!chunk) {
+    if (unlikely(!chunk)) {
         mutex_unlock(&arena->mutex);
         return NULL;
     }
@@ -653,7 +653,7 @@ static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t mi
 
     if (alignment <= MIN_ALIGN) {
         void *ptr = allocate(cache, size);
-        if (!ptr) {
+        if (unlikely(!ptr)) {
             return ENOMEM;
         }
         *memptr = ptr;
@@ -671,7 +671,7 @@ static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t mi
 
     if (worst_large_size < MAX_LARGE) {
         void *ptr = allocate_large(cache, size, (alignment + 15) & ~15);
-        if (!ptr) {
+        if (unlikely(!ptr)) {
             return ENOMEM;
         }
         *memptr = ptr;
@@ -679,7 +679,7 @@ static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t mi
     }
 
     void *ptr = huge_alloc(size, CHUNK_CEILING(alignment));
-    if (!ptr) {
+    if (unlikely(!ptr)) {
         return ENOMEM;
     }
     *memptr = ptr;
@@ -700,7 +700,7 @@ EXPORT void *malloc(size_t size) {
     struct thread_cache *cache = &tcache;
 
     void *ptr = allocate(cache, size);
-    if (!ptr) {
+    if (unlikely(!ptr)) {
         errno = ENOMEM;
         return NULL;
     }
@@ -711,12 +711,12 @@ EXPORT void *calloc(size_t nmemb, size_t size) {
     struct thread_cache *cache = &tcache;
 
     size_t total;
-    if (size_mul_overflow(nmemb, size, &total)) {
+    if (unlikely(size_mul_overflow(nmemb, size, &total))) {
         errno = ENOMEM;
         return NULL;
     }
     void *new_ptr = allocate(cache, total);
-    if (!new_ptr) {
+    if (unlikely(!new_ptr)) {
         errno = ENOMEM;
         return NULL;
     }
@@ -758,7 +758,7 @@ EXPORT void *realloc(void *ptr, size_t size) {
     }
 
     void *new_ptr = allocate(cache, size);
-    if (!new_ptr) {
+    if (unlikely(!new_ptr)) {
         errno = ENOMEM;
         return NULL;
     }
