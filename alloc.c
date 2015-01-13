@@ -670,7 +670,8 @@ static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t mi
     }
 
     if (worst_large_size < MAX_LARGE) {
-        void *ptr = allocate_large(cache, size, (alignment + 15) & ~15);
+        size_t real_size = (size + 15) & ~15;
+        void *ptr = allocate_large(cache, real_size, alignment);
         if (unlikely(!ptr)) {
             return ENOMEM;
         }
