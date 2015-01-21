@@ -1,3 +1,5 @@
+#define RB_COMPACT
+
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
@@ -13,11 +15,11 @@
 
 #include "bump.h"
 #include "chunk.h"
-#include "extent.h"
 #include "huge.h"
 #include "memory.h"
 #include "mutex.h"
 #include "util.h"
+#include "rb.h"
 
 #ifndef thread_local
 #define thread_local _Thread_local
@@ -34,9 +36,32 @@
 struct large {
     size_t size; // does not include the header
     void *prev;
-    struct extent_node *node;
+    rb_node(struct large) link_size_addr;
     max_align_t data[];
 };
+
+typedef rb_tree(struct large) large_tree;
+rb_proto(, large_tree_size_addr_, large_tree, struct large)
+
+static int large_addr_comp(struct large *a, struct large *b) {
+    uintptr_t a_addr = (uintptr_t)a;
+    uintptr_t b_addr = (uintptr_t)b;
+    return (a_addr > b_addr) - (a_addr < b_addr);
+}
+
+static int large_size_addr_comp(struct large *a, struct large *b) {
+    size_t a_size = a->size;
+    size_t b_size = b->size;
+
+    int ret = (a_size > b_size) - (a_size < b_size);
+    if (ret) {
+        return ret;
+    }
+
+    return large_addr_comp(a, b);
+}
+
+rb_gen(, large_tree_size_addr_, large_tree, struct large, link_size_addr, large_size_addr_comp)
 
 struct slot {
     struct slot *next;
@@ -61,7 +86,7 @@ struct arena {
     mutex mutex;
     struct slab *free_slab;
     struct slab *partial_slab[N_CLASS];
-    extent_tree large_size_addr;
+    large_tree large_size_addr;
 };
 
 static bool init_failed = false;
@@ -171,7 +196,7 @@ static bool malloc_init_slow(struct thread_cache *cache) {
             mutex_unlock(&init_mutex);
             return true;
         }
-        extent_tree_szad_new(&arena->large_size_addr);
+        large_tree_size_addr_new(&arena->large_size_addr);
     }
 
     huge_init();
@@ -309,16 +334,6 @@ static void *allocate_small(struct thread_cache *cache, size_t size) {
     return ptr;
 }
 
-static struct extent_node *slab_node_alloc(struct arena *arena) {
-    size_t size = sizeof(struct extent_node);
-    return slab_allocate(arena, size, size2bin(size));
-}
-
-static void slab_node_free(struct arena *arena, struct extent_node *node) {
-    struct slab *slab = ALIGNMENT_ADDR2BASE(node, SLAB_SIZE);
-    slab_deallocate(arena, slab, (struct slot *)node, size2bin(sizeof(struct extent_node)));
-}
-
 static void update_next_span(void *ptr, size_t size) {
     void *next = (char *)ptr + size;
     if (next < (void *)(CHUNK_CEILING((uintptr_t)next) - sizeof(struct large))) {
@@ -326,122 +341,81 @@ static void update_next_span(void *ptr, size_t size) {
     }
 }
 
-static void mark_free_span(struct extent_node *node) {
-    struct large *self = node->addr;
-    self->size = 0;
-    self->node = node;
+static const struct large used_sentinel;
+
+static bool is_used(struct large *large) {
+    return large->link_size_addr.rbn_left == &used_sentinel;
 }
 
-static void large_free(struct arena *arena, void *chunk, size_t size) {
-    struct large *next = (void *)((char *)chunk + size);
-    struct extent_node *node;
+static void mark_used(struct large *large) {
+    large->link_size_addr.rbn_left = (struct large *)&used_sentinel;
+}
 
-    /* Try to coalesce forward. */
-    if (next < (struct large *)(CHUNK_CEILING((uintptr_t)next) - sizeof(struct large)) && !next->size) {
-        node = next->node;
-        assert(node);
-        assert(node->addr == next);
+static void large_free(struct arena *arena, void *span, size_t size) {
+    struct large *self = span;
+    self->size = size;
 
-        /*
-         * Coalesce chunk with the following address range.
-         */
-        extent_tree_szad_remove(&arena->large_size_addr, node);
-        node->addr = chunk;
-        node->size += size;
-        extent_tree_szad_insert(&arena->large_size_addr, node);
-    } else {
-        node = slab_node_alloc(arena);
-        /* Coalescing forward failed, so insert a new node. */
-        if (!node) {
-            /*
-             * node_alloc() failed, which is an exceedingly
-             * unlikely failure.  Leak allocation.
-             */
-            return;
-        }
-        node->addr = chunk;
-        node->size = size;
-        extent_tree_szad_insert(&arena->large_size_addr, node);
+    struct large *next = (void *)((char *)span + size);
+
+    // Try to coalesce forward.
+    if (next < (struct large *)(CHUNK_CEILING((uintptr_t)next) - sizeof(struct large)) && !is_used(next)) {
+        // Coalesce span with the following address range.
+        large_tree_size_addr_remove(&arena->large_size_addr, next);
+        self->size += next->size;
     }
 
-    /* Try to coalesce backward. */
-    struct large *prev_head = ((struct large *)chunk)->prev;
-    if (prev_head && !prev_head->size) {
-        struct extent_node *prev = prev_head->node;
-        assert(prev);
-        assert(prev->addr == prev_head);
-        assert(prev->addr + prev->size == chunk);
-
-        /*
-         * Coalesce chunk with the previous address range.
-         */
-        extent_tree_szad_remove(&arena->large_size_addr, prev);
-
-        extent_tree_szad_remove(&arena->large_size_addr, node);
-        node->addr = prev->addr;
-        node->size += prev->size;
-        extent_tree_szad_insert(&arena->large_size_addr, node);
-
-        slab_node_free(arena, prev);
+    // Try to coalesce backward.
+    struct large *prev = ((struct large *)span)->prev;
+    if (prev && !is_used(prev)) {
+        // Coalesce span with the previous address range.
+        assert((char *)prev + prev->size == (char *)self);
+        large_tree_size_addr_remove(&arena->large_size_addr, prev);
+        size_t new_size = self->size + prev->size;
+        self = prev;
+        self->size = new_size;
     }
 
-    update_next_span(node->addr, node->size);
-    mark_free_span(node);
+    large_tree_size_addr_insert(&arena->large_size_addr, self);
+    update_next_span(self, self->size);
 }
 
 static struct large *large_recycle(struct arena *arena, size_t size, size_t alignment) {
     size_t full_size = size + sizeof(struct large);
     size_t alloc_size = full_size + alignment - MIN_ALIGN;
     assert(alloc_size >= full_size);
-    struct extent_node key;
-    key.addr = NULL;
+    struct large key;
     key.size = alloc_size;
-    struct extent_node *node = extent_tree_szad_nsearch(&arena->large_size_addr, &key);
-    if (!node) {
+    struct large *span = large_tree_size_addr_nsearch(&arena->large_size_addr, &key);
+    if (!span) {
         return NULL;
     }
 
-    void *data = (void *)ALIGNMENT_CEILING((uintptr_t)node->addr + sizeof(struct large), alignment);
+    void *data = (void *)ALIGNMENT_CEILING((uintptr_t)span + sizeof(struct large), alignment);
     struct large *head = (struct large *)((char *)data - sizeof(struct large));
-    head->size = size;
 
-    size_t leadsize = (char *)head - (char *)node->addr;
-    assert(node->size >= leadsize + full_size);
-    size_t trailsize = node->size - leadsize - full_size;
+    size_t leadsize = (char *)head - (char *)span;
+    assert(span->size >= leadsize + full_size);
+    size_t trailsize = span->size - leadsize - full_size;
 
-    /* Remove node from the tree. */
-    extent_tree_szad_remove(&arena->large_size_addr, node);
+    // Remove free span from the tree.
+    large_tree_size_addr_remove(&arena->large_size_addr, span);
     if (leadsize) {
-        /* Insert the leading space as a smaller chunk. */
-        node->size = leadsize;
-        extent_tree_szad_insert(&arena->large_size_addr, node);
-        update_next_span(node->addr, node->size);
-        node = NULL;
+        // Insert the leading space as a smaller chunk.
+        span->size = leadsize;
+        large_tree_size_addr_insert(&arena->large_size_addr, span);
+        update_next_span(span, span->size);
     }
     if (trailsize) {
-        /* Insert the trailing space as a smaller chunk. */
-        if (!node) {
-            node = slab_node_alloc(arena);
-            if (!node) {
-                large_free(arena, head, full_size);
-                return NULL;
-            }
-        }
-        node->addr = (void *)((uintptr_t)head + full_size);
-        node->size = trailsize;
-        extent_tree_szad_insert(&arena->large_size_addr, node);
-
-        update_next_span(node->addr, node->size);
-        mark_free_span(node);
-
-        node = NULL;
+        // Insert the trailing space as a smaller chunk.
+        struct large *trail = (struct large *)((char *)head + full_size);
+        trail->size = trailsize;
+        large_tree_size_addr_insert(&arena->large_size_addr, trail);
+        update_next_span(trail, trail->size);
     }
 
-    if (node)
-        slab_node_free(arena, node);
-
     update_next_span(head, full_size);
-
+    head->size = size;
+    mark_used(head);
     return head;
 }
 
@@ -469,6 +443,7 @@ static void *allocate_large(struct thread_cache *cache, size_t size, size_t alig
     head->prev = NULL;
 
     update_next_span(head, size + sizeof(struct large));
+    mark_used(head);
 
     if (head != base) {
         assert(alignment > MIN_ALIGN);
@@ -490,36 +465,27 @@ static void *allocate_large(struct thread_cache *cache, size_t size, size_t alig
 
 static bool large_expand_recycle(struct arena *arena, void *new_addr, size_t size) {
     assert(new_addr);
+    assert(ALIGNMENT_ADDR2BASE(new_addr, MIN_ALIGN) == new_addr);
 
-    struct extent_node *node = NULL;
-    if (new_addr < (void *)(CHUNK_CEILING((uintptr_t)new_addr) - sizeof(struct large))) {
-        struct large *head = new_addr;
-        if (!head->size) {
-            node = head->node;
-            assert(node);
-            assert(node->addr == new_addr);
-        }
-    }
-
-    if (!node || node->size < size) {
+    if (new_addr >= (void *)(CHUNK_CEILING((uintptr_t)new_addr) - sizeof(struct large))) {
         return true;
     }
-    assert(ALIGNMENT_ADDR2BASE(node->addr, MIN_ALIGN) == node->addr);
 
-    /* Remove node from the tree. */
-    extent_tree_szad_remove(&arena->large_size_addr, node);
+    struct large *next = new_addr;
+    if (is_used(next) || next->size < size) {
+        return true;
+    }
 
-    void *ret = node->addr;
-    size_t trailsize = node->size - size;
+    // Remove node from the tree.
+    large_tree_size_addr_remove(&arena->large_size_addr, next);
+
+    size_t trailsize = next->size - size;
     if (trailsize) {
-        /* Insert the trailing space as a smaller chunk. */
-        node->addr = (void *)((uintptr_t)ret + size);
-        node->size = trailsize;
-        extent_tree_szad_insert(&arena->large_size_addr, node);
-        update_next_span(node->addr, node->size);
-        mark_free_span(node);
-    } else {
-        slab_node_free(arena, node);
+        // Insert the trailing space as a smaller chunk.
+        struct large *trail = (struct large *)((char *)next + size);
+        trail->size = trailsize;
+        large_tree_size_addr_insert(&arena->large_size_addr, trail);
+        update_next_span(trail, trail->size);
     }
 
     return false;
