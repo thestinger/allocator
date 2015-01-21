@@ -700,9 +700,7 @@ static void *alloc_aligned_simple(size_t alignment, size_t size) {
 }
 
 EXPORT void *malloc(size_t size) {
-    struct thread_cache *cache = &tcache;
-
-    void *ptr = allocate(cache, size);
+    void *ptr = allocate(&tcache, size);
     if (unlikely(!ptr)) {
         errno = ENOMEM;
         return NULL;
@@ -711,14 +709,12 @@ EXPORT void *malloc(size_t size) {
 }
 
 EXPORT void *calloc(size_t nmemb, size_t size) {
-    struct thread_cache *cache = &tcache;
-
     size_t total;
     if (unlikely(size_mul_overflow(nmemb, size, &total))) {
         errno = ENOMEM;
         return NULL;
     }
-    void *new_ptr = allocate(cache, total);
+    void *new_ptr = allocate(&tcache, total);
     if (unlikely(!new_ptr)) {
         errno = ENOMEM;
         return NULL;
