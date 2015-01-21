@@ -10,17 +10,15 @@
 
 - arenas:
     - assign chunks to per-core arenas
-    - separate arenas for small/large, distinguished via chunk header flag
     - pick a preferred arena with sched_getcpu and update it on contention
+    - separate chunks for small/large, distinguished via chunk header flag
 
 - large allocations:
     - allocation headers for freeing allocations and coalescing:
         - find the next span with `addr + size` for forward coalescing
         - maintain a pointer to the previous span for backward coalescing
-    - per-arena ordered map keyed by (size, addr) for address-ordered best-fit
-        - intrusive tree would eliminate all metadata overhead for free spans
-        - 4x pointer minimum span size with a packed tree representation
-        - potentially only 2x pointer overhead for active allocations
+    - intrusive tree keyed by (size, addr) for address-ordered best-fit
+        - the span headers are the tree nodes, making them 4x pointer size
     - potentially a small thread-local cache of free spans
 
 - small allocations:
