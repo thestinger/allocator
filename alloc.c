@@ -32,6 +32,7 @@
 #define CACHE_SIZE (16 * 1024)
 #define MAX_SMALL 512
 #define MAX_LARGE (CHUNK_SIZE - (sizeof(struct chunk) + sizeof(struct large)))
+#define LARGE_CHUNK_HEADER ((sizeof(struct chunk) + LARGE_MASK) & ~LARGE_MASK)
 
 struct large {
     size_t size; // does not include the header
@@ -87,6 +88,7 @@ struct arena {
     struct slab *free_slab;
     struct slab *partial_slab[N_CLASS];
     large_tree large_size_addr;
+    struct chunk *free_chunk;
 };
 
 static bool init_failed = false;
@@ -223,6 +225,24 @@ static struct arena *get_arena(struct thread_cache *cache) {
     return &arenas[cache->arena_index];
 }
 
+static struct chunk *arena_chunk_alloc(struct arena *arena) {
+    if (arena->free_chunk) {
+        struct chunk *chunk = arena->free_chunk;
+        arena->free_chunk = NULL;
+        return chunk;
+    }
+    return chunk_alloc(NULL, CHUNK_SIZE, CHUNK_SIZE);
+}
+
+static void arena_chunk_free(struct arena *arena, struct chunk *chunk) {
+    if (arena->free_chunk) {
+        memory_purge(chunk, CHUNK_SIZE);
+        chunk_free(chunk, CHUNK_SIZE);
+    } else {
+        arena->free_chunk = chunk;
+    }
+}
+
 static void *slab_first_alloc(struct slab *slab, size_t size) {
     slab->size = size;
     void *first = (void *)ALIGNMENT_CEILING((uintptr_t)slab->data, MIN_ALIGN);
@@ -243,7 +263,7 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
             return slab_first_alloc(slab, size);
         }
 
-        struct chunk *chunk = chunk_alloc(NULL, CHUNK_SIZE, CHUNK_SIZE);
+        struct chunk *chunk = arena_chunk_alloc(arena);
         if (unlikely(!chunk)) {
             return NULL;
         }
@@ -375,8 +395,12 @@ static void large_free(struct arena *arena, void *span, size_t size) {
         self->size = new_size;
     }
 
-    large_tree_size_addr_insert(&arena->large_size_addr, self);
-    update_next_span(self, self->size);
+    if (self->size == CHUNK_SIZE - LARGE_CHUNK_HEADER) {
+        arena_chunk_free(arena, (struct chunk *)((char *)self - LARGE_CHUNK_HEADER));
+    } else {
+        large_tree_size_addr_insert(&arena->large_size_addr, self);
+        update_next_span(self, self->size);
+    }
 }
 
 static struct large *large_recycle(struct arena *arena, size_t size, size_t alignment) {
@@ -428,7 +452,7 @@ static void *allocate_large(struct thread_cache *cache, size_t size, size_t alig
         return head->data;
     }
 
-    struct chunk *chunk = chunk_alloc(NULL, CHUNK_SIZE, CHUNK_SIZE);
+    struct chunk *chunk = arena_chunk_alloc(arena);
     if (unlikely(!chunk)) {
         mutex_unlock(&arena->mutex);
         return NULL;
@@ -618,10 +642,11 @@ static inline void deallocate(struct thread_cache *cache, void *ptr) {
     if (chunk->small) {
         deallocate_small(cache, ptr);
     } else {
-        mutex_lock(&arenas[chunk->arena].mutex);
+        struct arena *arena = &arenas[chunk->arena];
+        mutex_lock(&arena->mutex);
         struct large *head = (struct large *)((char *)ptr - sizeof(struct large));
-        large_free(&arenas[chunk->arena], head, head->size + sizeof(struct large));
-        mutex_unlock(&arenas[chunk->arena].mutex);
+        large_free(arena, head, head->size + sizeof(struct large));
+        mutex_unlock(&arena->mutex);
     }
 }
 
