@@ -155,8 +155,9 @@ static void pick_arena(struct thread_cache *cache) {
 
 static void thread_init(struct thread_cache *cache) {
     pick_arena(cache);
-    pthread_setspecific(tcache_key, cache);
-    cache->dead = false;
+    if (!pthread_setspecific(tcache_key, cache)) {
+        cache->dead = false;
+    }
 }
 
 static bool malloc_init_slow(struct thread_cache *cache) {
@@ -318,14 +319,14 @@ static void *allocate_small(struct thread_cache *cache, size_t size) {
     size_t bin = size2bin(size);
 
     if (unlikely(cache->dead)) {
-        if (cache->arena_index != -1) {
+        if (cache->arena_index == -1 && unlikely(malloc_init(cache))) {
+            return NULL;
+        }
+        if (unlikely(cache->dead)) {
             struct arena *arena = get_arena(cache);
             void *ptr = slab_allocate(arena, size, bin);
             mutex_unlock(&arena->mutex);
             return ptr;
-        }
-        if (unlikely(malloc_init(cache))) {
-            return NULL;
         }
     }
 
@@ -573,7 +574,10 @@ static void deallocate_small(struct thread_cache *cache, void *ptr) {
     size_t bin = size2bin(size);
 
     if (unlikely(cache->dead)) {
-        if (cache->arena_index != -1) {
+        if (cache->arena_index == -1) {
+            thread_init(cache);
+        }
+        if (unlikely(cache->dead)) {
             struct chunk *chunk = CHUNK_ADDR2BASE(slot);
             struct arena *arena = &arenas[chunk->arena];
             mutex_lock(&arena->mutex);
@@ -581,7 +585,6 @@ static void deallocate_small(struct thread_cache *cache, void *ptr) {
             mutex_unlock(&arena->mutex);
             return;
         }
-        thread_init(cache);
     }
 
     slot->next = cache->bin[bin];
