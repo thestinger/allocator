@@ -534,7 +534,6 @@ static bool large_realloc_no_move(void *ptr, size_t old_size, size_t new_size) {
         head->size = new_size;
         update_next_span(head, new_size + sizeof(struct large));
         mutex_unlock(&arena->mutex);
-        return false;
     } else if (new_size < old_size) {
         void *excess_addr = (char *)ptr + new_size;
         size_t excess_size = old_size - new_size;
