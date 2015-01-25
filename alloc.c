@@ -89,8 +89,13 @@ struct chunk {
 
 struct arena {
     mutex mutex;
+
+    // intrusive singly-linked list
     struct slab *free_slab;
-    struct slab *partial_slab[N_CLASS];
+
+    // intrusive circular doubly-linked list, with this sentinel node at both ends
+    struct slab partial_slab[N_CLASS];
+
     large_tree large_size_addr;
     struct chunk *free_chunk;
 };
@@ -204,6 +209,12 @@ static bool malloc_init_slow(struct thread_cache *cache) {
             return true;
         }
         large_tree_size_addr_new(&arena->large_size_addr);
+        for (size_t bin = 0; bin < N_CLASS; bin++) {
+#ifndef NDEBUG
+            arena->partial_slab[bin].prev = (struct slab *)0xdeadbeef;
+#endif
+            arena->partial_slab[bin].next = &arena->partial_slab[bin];
+        }
     }
 
     huge_init();
@@ -248,8 +259,8 @@ static void arena_chunk_free(struct arena *arena, struct chunk *chunk) {
     }
 }
 
-static void *slab_first_alloc(struct slab *slab, size_t size) {
-    slab->prev = NULL;
+static void *slab_first_alloc(struct arena *arena, struct slab *slab, size_t size, size_t bin) {
+    slab->prev = &arena->partial_slab[bin];
     slab->size = size;
     slab->count = 1;
     void *first = (void *)ALIGNMENT_CEILING((uintptr_t)slab->data, MIN_ALIGN);
@@ -260,15 +271,16 @@ static void *slab_first_alloc(struct slab *slab, size_t size) {
 }
 
 static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
-    if (!arena->partial_slab[bin]) {
+    // check for the sentinel node terminating the list
+    if (!arena->partial_slab[bin].next->next_slot) {
         if (arena->free_slab) {
             struct slab *slab = arena->free_slab;
             arena->free_slab = arena->free_slab->next;
 
-            slab->next = arena->partial_slab[bin];
-            arena->partial_slab[bin] = slab;
+            slab->next = arena->partial_slab[bin].next;
+            arena->partial_slab[bin].next = slab;
 
-            return slab_first_alloc(slab, size);
+            return slab_first_alloc(arena, slab, size, bin);
         }
 
         struct chunk *chunk = arena_chunk_alloc(arena);
@@ -279,8 +291,8 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
         chunk->small = true;
 
         struct slab *slab = (struct slab *)ALIGNMENT_CEILING((uintptr_t)chunk->data, SLAB_SIZE);
-        slab->next = arena->partial_slab[bin];
-        arena->partial_slab[bin] = slab;
+        slab->next = arena->partial_slab[bin].next;
+        arena->partial_slab[bin].next = slab;
 
         void *chunk_end = (char *)chunk + CHUNK_SIZE;
         while ((uintptr_t)slab + SLAB_SIZE < (uintptr_t)chunk_end) {
@@ -289,10 +301,10 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
             arena->free_slab = slab;
         }
 
-        return slab_first_alloc(arena->partial_slab[bin], size);
+        return slab_first_alloc(arena, arena->partial_slab[bin].next, size, bin);
     }
 
-    struct slab *slab = arena->partial_slab[bin];
+    struct slab *slab = arena->partial_slab[bin].next;
     struct slot *slot = slab->next_slot;
     slab->next_slot = slot->next;
     slab->count++;
@@ -300,10 +312,8 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
         uintptr_t new_end = (uintptr_t)slab->end + size;
         if (new_end > (uintptr_t)slab + SLAB_SIZE) {
             struct slab *next = slab->next;
-            if (next) {
-                next->prev = NULL;
-            }
-            arena->partial_slab[bin] = next;
+            next->prev = &arena->partial_slab[bin];
+            arena->partial_slab[bin].next = next;
         } else {
             slab->next_slot = slab->end;
             slab->next_slot->next = NULL;
@@ -324,23 +334,14 @@ static void slab_deallocate(struct arena *arena, struct slab *slab, struct slot 
     slab->count--;
 
     if (!slot->next) {
-        struct slab *next = arena->partial_slab[bin];
+        struct slab *next = arena->partial_slab[bin].next;
         slab->next = next;
-        slab->prev = NULL;
-        if (next) {
-            next->prev = slab;
-        }
-        arena->partial_slab[bin] = slab;
+        slab->prev = &arena->partial_slab[bin];
+        next->prev = slab;
+        arena->partial_slab[bin].next = slab;
     } else if (!slab->count) {
-        if (slab->prev) {
-            slab->prev->next = slab->next;
-        } else {
-            arena->partial_slab[bin] = slab->next;
-        }
-
-        if (slab->next) {
-            slab->next->prev = slab->prev;
-        }
+        slab->prev->next = slab->next;
+        slab->next->prev = slab->prev;
 
         slab->next = arena->free_slab;
         arena->free_slab = slab;
