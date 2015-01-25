@@ -248,6 +248,7 @@ static void *slab_first_alloc(struct slab *slab, size_t size) {
     slab->size = size;
     void *first = (void *)ALIGNMENT_CEILING((uintptr_t)slab->data, MIN_ALIGN);
     slab->next_slot = (struct slot *)((char *)first + size);
+    slab->next_slot->next = NULL;
     slab->end = (struct slot *)((char *)slab->next_slot + size);
     return first;
 }
@@ -294,6 +295,7 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
             arena->partial_slab[bin] = slab->next;
         } else {
             slab->next_slot = slab->end;
+            slab->next_slot->next = NULL;
             slab->end = (struct slot *)new_end;
         }
     }
