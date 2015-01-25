@@ -71,9 +71,13 @@ struct slot {
 
 struct slab {
     struct slab *next;
+    struct slab *prev;
+
     size_t size;
     struct slot *next_slot;
     struct slot *end;
+
+    uint16_t count;
     uint8_t data[];
 };
 
@@ -245,7 +249,9 @@ static void arena_chunk_free(struct arena *arena, struct chunk *chunk) {
 }
 
 static void *slab_first_alloc(struct slab *slab, size_t size) {
+    slab->prev = NULL;
     slab->size = size;
+    slab->count = 1;
     void *first = (void *)ALIGNMENT_CEILING((uintptr_t)slab->data, MIN_ALIGN);
     slab->next_slot = (struct slot *)((char *)first + size);
     slab->next_slot->next = NULL;
@@ -289,10 +295,15 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
     struct slab *slab = arena->partial_slab[bin];
     struct slot *slot = slab->next_slot;
     slab->next_slot = slot->next;
+    slab->count++;
     if (!slab->next_slot) {
         uintptr_t new_end = (uintptr_t)slab->end + size;
         if (new_end > (uintptr_t)slab + SLAB_SIZE) {
-            arena->partial_slab[bin] = slab->next;
+            struct slab *next = slab->next;
+            if (next) {
+                next->prev = NULL;
+            }
+            arena->partial_slab[bin] = next;
         } else {
             slab->next_slot = slab->end;
             slab->next_slot->next = NULL;
@@ -310,10 +321,29 @@ static size_t size2bin(size_t size) {
 static void slab_deallocate(struct arena *arena, struct slab *slab, struct slot *slot, size_t bin) {
     slot->next = slab->next_slot;
     slab->next_slot = slot;
+    slab->count--;
 
     if (!slot->next) {
-        slab->next = arena->partial_slab[bin];
+        struct slab *next = arena->partial_slab[bin];
+        slab->next = next;
+        slab->prev = NULL;
+        if (next) {
+            next->prev = slab;
+        }
         arena->partial_slab[bin] = slab;
+    } else if (!slab->count) {
+        if (slab->prev) {
+            slab->prev->next = slab->next;
+        } else {
+            arena->partial_slab[bin] = slab->next;
+        }
+
+        if (slab->next) {
+            slab->next->prev = slab->prev;
+        }
+
+        slab->next = arena->free_slab;
+        arena->free_slab = slab;
     }
 }
 
