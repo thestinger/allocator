@@ -252,11 +252,10 @@ static struct chunk *arena_chunk_alloc(struct arena *arena) {
 
 static void arena_chunk_free(struct arena *arena, struct chunk *chunk) {
     if (arena->free_chunk) {
-        memory_purge(chunk, CHUNK_SIZE);
-        chunk_free(chunk, CHUNK_SIZE);
-    } else {
-        arena->free_chunk = chunk;
+        memory_purge(arena->free_chunk, CHUNK_SIZE);
+        chunk_free(arena->free_chunk, CHUNK_SIZE);
     }
+    arena->free_chunk = chunk;
 }
 
 static void *slab_first_alloc(struct arena *arena, struct slab *slab, size_t size, size_t bin) {
