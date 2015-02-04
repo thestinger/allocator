@@ -190,7 +190,7 @@ static bool malloc_init_slow(struct thread_cache *cache) {
     }
 
     n_arenas = get_nprocs();
-    arenas = bump_alloc(sizeof(struct arena) * n_arenas);
+    arenas = bump_alloc(sizeof(struct arena) * n_arenas, alignof(struct arena));
     if (!arenas) {
         init_failed = true;
         mutex_unlock(&init_mutex);

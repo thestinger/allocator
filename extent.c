@@ -1,3 +1,5 @@
+#include <stdalign.h>
+
 #include "bump.h"
 #include "extent.h"
 #include "mutex.h"
@@ -38,7 +40,7 @@ struct extent_node *node_alloc(void) {
         return node;
     }
     mutex_unlock(&node_mutex);
-    return bump_alloc(sizeof(struct extent_node));
+    return bump_alloc(sizeof(struct extent_node), alignof(struct extent_node));
 }
 
 void node_free(struct extent_node *node) {

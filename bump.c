@@ -1,3 +1,5 @@
+#include <assert.h>
+
 #include "bump.h"
 #include "chunk.h"
 #include "memory.h"
@@ -7,9 +9,13 @@ static mutex bump_mutex = MUTEX_INITIALIZER;
 static void *bump;
 static void *bump_end;
 
-void *bump_alloc(size_t size) {
+void *bump_alloc(size_t size, size_t align) {
+    assert(size <= CHUNK_SIZE && align <= PAGE_SIZE);
+
     mutex_lock(&bump_mutex);
-    if ((uintptr_t)bump + size > (uintptr_t)bump_end) {
+
+    uintptr_t ret = ALIGNMENT_CEILING((uintptr_t)bump, align);
+    if (ret + size > (uintptr_t)bump_end) {
         size_t chunk_size = CHUNK_CEILING(size);
         void *ptr = memory_map(NULL, chunk_size);
         if (!ptr) {
@@ -18,10 +24,10 @@ void *bump_alloc(size_t size) {
         }
         bump = ptr;
         bump_end = ptr + chunk_size;
+        ret = (uintptr_t)ptr;
     }
 
-    void *ret = bump;
-    bump = (void *)((char *)bump + size);
+    bump = (void *)(ret + size);
     mutex_unlock(&bump_mutex);
-    return ret;
+    return (void *)ret;
 }

@@ -3,6 +3,6 @@
 
 #include <stddef.h>
 
-void *bump_alloc(size_t size);
+void *bump_alloc(size_t size, size_t align);
 
 #endif
