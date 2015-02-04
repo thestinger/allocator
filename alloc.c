@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <sched.h>
+#include <stdalign.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -25,6 +26,7 @@
 #define thread_local _Thread_local
 #endif
 
+#define CACHELINE 64
 #define N_CLASS 32
 #define LARGE_MASK (sizeof(struct large) - 1)
 #define MIN_ALIGN 16
@@ -88,7 +90,7 @@ struct chunk {
 };
 
 struct arena {
-    mutex mutex;
+    alignas(CACHELINE) mutex mutex;
 
     // intrusive singly-linked list
     struct slab *free_slab;
