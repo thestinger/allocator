@@ -219,8 +219,9 @@ static bool malloc_init_slow(struct thread_cache *cache) {
         }
     }
 
-    huge_init();
+    memory_init();
     chunk_init();
+    huge_init();
     atomic_store_explicit(&initialized, true, memory_order_release);
 
     mutex_unlock(&init_mutex);
@@ -254,7 +255,7 @@ static struct chunk *arena_chunk_alloc(struct arena *arena) {
 
 static void arena_chunk_free(struct arena *arena, struct chunk *chunk) {
     if (arena->free_chunk) {
-        memory_purge(arena->free_chunk, CHUNK_SIZE);
+        memory_decommit(arena->free_chunk, CHUNK_SIZE);
         chunk_free(arena->free_chunk, CHUNK_SIZE);
     }
     arena->free_chunk = chunk;

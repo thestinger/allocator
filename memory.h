@@ -20,8 +20,11 @@
 // Return the smallest page size multiple that is >= s.
 #define PAGE_CEILING(s) (((s) + PAGE_MASK) & ~PAGE_MASK)
 
-void memory_purge(void *ptr, size_t size);
+void memory_init(void);
+void memory_decommit(void *ptr, size_t size);
+bool memory_commit(void *ptr, size_t size);
 void *memory_map(void *hint, size_t size);
+void *memory_reserve(void *hint, size_t size);
 void *memory_map_aligned(void *hint, size_t size, size_t alignment);
 void memory_unmap(void *ptr, size_t size);
 bool memory_remap_fixed(void *addr, size_t old_size, void *new_addr, size_t new_size);

@@ -2,7 +2,9 @@
 
 - low-memory memory management:
     - naturally aligned chunks as the fundamental building block
-    - virtual memory managed in userspace to reduce fragmentation and overhead
+    - virtual memory managed in userspace to reduce fragmentation and overhead:
+        - memory is purged with MADV_FREE/MADV_DONTNEED rather than unmapping
+        - if overcommit is disabled, commit charge is dropped via PROT_NONE
     - node for each span of free chunks:
         - intrusive tree ordered by (size, addr) for address-ordered best-fit
         - intrusive tree ordered by (addr,) for coalescing

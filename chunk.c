@@ -90,6 +90,10 @@ static void *chunk_recycle(void *new_addr, size_t size, size_t alignment) {
     assert(!new_addr || leadsize == 0);
     size_t trailsize = node->size - leadsize - size;
     void *ret = (void *)((uintptr_t)node->addr + leadsize);
+    if (memory_commit(ret, size)) {
+        return NULL;
+    }
+
     /* Remove node from the tree. */
     extent_tree_szad_remove(&chunks_size_addr, node);
     extent_tree_ad_remove(&chunks_addr, node);
@@ -106,6 +110,7 @@ static void *chunk_recycle(void *new_addr, size_t size, size_t alignment) {
             node = node_alloc();
             if (!node) {
                 mutex_unlock(&chunks_mutex);
+                memory_decommit(ret, size);
                 chunk_free(ret, size);
                 return NULL;
             }

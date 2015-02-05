@@ -45,7 +45,7 @@ static void huge_no_move_shrink(void *ptr, size_t old_size, size_t new_size) {
     void *excess_addr = (char *)node->addr + new_size;
     size_t excess_size = old_size - new_size;
 
-    memory_purge(excess_addr, excess_size);
+    memory_decommit(excess_addr, excess_size);
     chunk_free(excess_addr, excess_size);
 }
 
@@ -88,7 +88,7 @@ static void *huge_remap_expand(void *old_addr, size_t old_size, size_t new_size)
     // for preserving the old mapping to avoid the possibility of failing to map the right address.
     //
     // https://lkml.org/lkml/2014/10/2/624
-    void *extra = memory_map(old_addr, old_size);
+    void *extra = memory_reserve(old_addr, old_size);
     if (extra) {
         if (ALIGNMENT_ADDR2OFFSET(extra, CHUNK_SIZE)) {
             memory_unmap(extra, old_size);
@@ -134,7 +134,7 @@ void huge_free(void *ptr) {
     extent_tree_ad_remove(&huge, node);
     mutex_unlock(&huge_mutex);
 
-    memory_purge(ptr, node->size);
+    memory_decommit(ptr, node->size);
     chunk_free(ptr, node->size);
     node_free(node);
 }
