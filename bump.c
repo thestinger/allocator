@@ -10,7 +10,7 @@ static void *bump;
 static void *bump_end;
 
 void *bump_alloc(size_t size, size_t align) {
-    assert(size <= CHUNK_SIZE && align <= PAGE_SIZE);
+    assert(align <= PAGE_SIZE);
 
     mutex_lock(&bump_mutex);
 
