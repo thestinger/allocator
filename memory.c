@@ -7,6 +7,8 @@
 #include "memory.h"
 #include "util.h"
 
+// use MAP_NORESERVE to get either proper memory accounting or full overcommit
+static const int map_flags = MAP_ANONYMOUS|MAP_PRIVATE|MAP_NORESERVE;
 static bool reduce_commit_charge = true;
 
 void memory_init(void) {
@@ -23,7 +25,7 @@ void memory_init(void) {
 
 void memory_decommit(void *addr, size_t size) {
     if (reduce_commit_charge) {
-        mmap(addr, size, PROT_NONE, MAP_ANONYMOUS|MAP_PRIVATE|MAP_FIXED, -1, 0);
+        mmap(addr, size, PROT_NONE, map_flags|MAP_FIXED, -1, 0);
     } else {
         madvise(addr, size, MADV_DONTNEED);
     }
@@ -37,7 +39,7 @@ bool memory_commit(UNUSED void *addr, UNUSED size_t size) {
 }
 
 void *memory_map(void *hint, size_t size) {
-    void *addr = mmap(hint, size, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+    void *addr = mmap(hint, size, PROT_READ|PROT_WRITE, map_flags, -1, 0);
     if (addr == MAP_FAILED) {
         return NULL;
     }
@@ -46,7 +48,7 @@ void *memory_map(void *hint, size_t size) {
 
 void *memory_reserve(void *hint, size_t size) {
     int prot = reduce_commit_charge ? PROT_NONE : PROT_READ|PROT_WRITE;
-    void *addr = mmap(hint, size, prot, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+    void *addr = mmap(hint, size, prot, map_flags, -1, 0);
     if (addr == MAP_FAILED) {
         return NULL;
     }
