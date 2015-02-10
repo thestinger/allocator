@@ -390,13 +390,6 @@ static void *allocate_small(struct thread_cache *cache, size_t size) {
     return ptr;
 }
 
-static void update_next_span(void *ptr, size_t size) {
-    void *next = (char *)ptr + size;
-    if (next < (void *)(CHUNK_CEILING((uintptr_t)next) - sizeof(struct large))) {
-        ((struct large *)next)->prev = ptr;
-    }
-}
-
 static const struct large used_sentinel;
 
 static bool is_used(struct large *large) {
@@ -407,6 +400,17 @@ static void mark_used(struct large *large) {
     large->link_size_addr.rbn_left = (struct large *)&used_sentinel;
 }
 
+static struct large *to_head(void *ptr) {
+    return (struct large *)((char *)ptr - sizeof(struct large));
+}
+
+static void update_next_span(void *ptr, size_t size) {
+    void *next = (char *)ptr + size;
+    if (next < (void *)to_head((void *)CHUNK_CEILING((uintptr_t)next))) {
+        ((struct large *)next)->prev = ptr;
+    }
+}
+
 static void large_free(struct arena *arena, void *span, size_t size) {
     struct large *self = span;
     self->size = size;
@@ -414,7 +418,7 @@ static void large_free(struct arena *arena, void *span, size_t size) {
     struct large *next = (void *)((char *)span + size);
 
     // Try to coalesce forward.
-    if (next < (struct large *)(CHUNK_CEILING((uintptr_t)next) - sizeof(struct large)) && !is_used(next)) {
+    if (next < to_head((void *)CHUNK_CEILING((uintptr_t)next)) && !is_used(next)) {
         // Coalesce span with the following address range.
         large_tree_size_addr_remove(&arena->large_size_addr, next);
         self->size += next->size;
@@ -451,7 +455,7 @@ static struct large *large_recycle(struct arena *arena, size_t size, size_t alig
     }
 
     void *data = (void *)ALIGNMENT_CEILING((uintptr_t)span + sizeof(struct large), alignment);
-    struct large *head = (struct large *)((char *)data - sizeof(struct large));
+    struct large *head = to_head(data);
 
     size_t leadsize = (char *)head - (char *)span;
     assert(span->size >= leadsize + full_size);
@@ -498,7 +502,7 @@ static void *allocate_large(struct thread_cache *cache, size_t size, size_t alig
 
     void *base = (void *)ALIGNMENT_CEILING((uintptr_t)((char *)chunk + sizeof(struct chunk)), sizeof(struct large));
     void *data = (void *)ALIGNMENT_CEILING((uintptr_t)base + sizeof(struct large), alignment);
-    head = (struct large *)((char *)data - sizeof(struct large));
+    head = to_head(data);
     head->size = size;
     head->prev = NULL;
 
@@ -527,7 +531,7 @@ static bool large_expand_recycle(struct arena *arena, void *new_addr, size_t siz
     assert(new_addr);
     assert(ALIGNMENT_ADDR2BASE(new_addr, MIN_ALIGN) == new_addr);
 
-    if (new_addr >= (void *)(CHUNK_CEILING((uintptr_t)new_addr) - sizeof(struct large))) {
+    if (new_addr >= (void *)to_head((void *)CHUNK_CEILING((uintptr_t)new_addr))) {
         return true;
     }
 
@@ -555,7 +559,7 @@ static bool large_realloc_no_move(void *ptr, size_t old_size, size_t new_size) {
     struct chunk *chunk = CHUNK_ADDR2BASE(ptr);
     assert(!chunk->small);
     struct arena *arena = &arenas[chunk->arena];
-    struct large *head = (struct large *)((char *)ptr - sizeof(struct large));
+    struct large *head = to_head(ptr);
 
     if (old_size < new_size) {
         void *expand_addr = (char *)ptr + old_size;
@@ -681,7 +685,7 @@ static inline void deallocate(struct thread_cache *cache, void *ptr) {
     } else {
         struct arena *arena = &arenas[chunk->arena];
         mutex_lock(&arena->mutex);
-        struct large *head = (struct large *)((char *)ptr - sizeof(struct large));
+        struct large *head = to_head(ptr);
         large_free(arena, head, head->size + sizeof(struct large));
         mutex_unlock(&arena->mutex);
     }
@@ -702,8 +706,7 @@ static size_t alloc_size(void *ptr) {
         struct slab *slab = ALIGNMENT_ADDR2BASE(ptr, SLAB_SIZE);
         return slab->size;
     }
-    struct large *head = (struct large *)((char *)ptr - sizeof(struct large));
-    return head->size;
+    return to_head(ptr)->size;
 }
 
 static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t min_alignment) {
