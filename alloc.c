@@ -500,7 +500,7 @@ static void *allocate_large(struct thread_cache *cache, size_t size, size_t alig
     chunk->arena = cache->arena_index;
     chunk->small = false;
 
-    void *base = (void *)ALIGNMENT_CEILING((uintptr_t)((char *)chunk + sizeof(struct chunk)), sizeof(struct large));
+    void *base = (char *)chunk + LARGE_CHUNK_HEADER;
     void *data = (void *)ALIGNMENT_CEILING((uintptr_t)base + sizeof(struct large), alignment);
     head = to_head(data);
     head->size = size;
