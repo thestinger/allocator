@@ -33,8 +33,8 @@
 #define SLAB_SIZE (64 * 1024)
 #define CACHE_SIZE (16 * 1024)
 #define MAX_SMALL 512
-#define MAX_LARGE (CHUNK_SIZE - (sizeof(struct chunk) + sizeof(struct large)))
 #define LARGE_CHUNK_HEADER ((sizeof(struct chunk) + LARGE_MASK) & ~LARGE_MASK)
+#define MAX_LARGE (CHUNK_SIZE - (LARGE_CHUNK_HEADER + sizeof(struct large)))
 
 struct large {
     size_t size; // does not include the header
