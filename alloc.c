@@ -854,7 +854,7 @@ EXPORT void *valloc(size_t size) {
 EXPORT void *pvalloc(size_t size) {
     size_t rounded = PAGE_CEILING(size);
     if (unlikely(!rounded)) {
-        errno = EINVAL;
+        errno = ENOMEM;
         return NULL;
     }
     return alloc_aligned_simple(PAGE_SIZE, rounded);
