@@ -392,7 +392,7 @@ static void *allocate_small(struct thread_cache *cache, size_t size) {
 
 static const struct large used_sentinel;
 
-static bool is_used(struct large *large) {
+static bool is_used(const struct large *large) {
     return large->link_size_addr.rbn_left == &used_sentinel;
 }
 
