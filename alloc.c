@@ -406,7 +406,7 @@ static struct large *to_head(void *ptr) {
 
 static void update_next_span(void *ptr, size_t size) {
     void *next = (char *)ptr + size;
-    if (next < (void *)to_head((void *)CHUNK_CEILING((uintptr_t)next))) {
+    if (next <= (void *)to_head((void *)CHUNK_CEILING((uintptr_t)next))) {
         ((struct large *)next)->prev = ptr;
     }
 }
@@ -418,7 +418,7 @@ static void large_free(struct arena *arena, void *span, size_t size) {
     struct large *next = (void *)((char *)span + size);
 
     // Try to coalesce forward.
-    if (next < to_head((void *)CHUNK_CEILING((uintptr_t)next)) && !is_used(next)) {
+    if (next <= to_head((void *)CHUNK_CEILING((uintptr_t)next)) && !is_used(next)) {
         // Coalesce span with the following address range.
         large_tree_size_addr_remove(&arena->large_size_addr, next);
         self->size += next->size;
@@ -520,7 +520,9 @@ static void *allocate_large(struct thread_cache *cache, size_t size, size_t alig
 
     void *end = (char *)head->data + size;
     void *chunk_end = (char *)chunk + CHUNK_SIZE;
-    large_free(arena, end, chunk_end - end);
+    if (end != chunk_end) {
+        large_free(arena, end, chunk_end - end);
+    }
 
     mutex_unlock(&arena->mutex);
 
@@ -531,7 +533,7 @@ static bool large_expand_recycle(struct arena *arena, void *new_addr, size_t siz
     assert(new_addr);
     assert(ALIGNMENT_ADDR2BASE(new_addr, MIN_ALIGN) == new_addr);
 
-    if (new_addr >= (void *)to_head((void *)CHUNK_CEILING((uintptr_t)new_addr))) {
+    if (new_addr > (void *)to_head((void *)CHUNK_CEILING((uintptr_t)new_addr))) {
         return true;
     }
 
