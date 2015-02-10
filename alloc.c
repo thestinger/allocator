@@ -405,9 +405,9 @@ static struct large *to_head(void *ptr) {
 }
 
 static void update_next_span(void *ptr, size_t size) {
-    void *next = (char *)ptr + size;
-    if (next <= (void *)to_head((void *)CHUNK_CEILING((uintptr_t)next))) {
-        ((struct large *)next)->prev = ptr;
+    struct large *next = (struct large *)((char *)ptr + size);
+    if (next <= to_head((void *)CHUNK_CEILING((uintptr_t)next))) {
+        next->prev = ptr;
     }
 }
 
