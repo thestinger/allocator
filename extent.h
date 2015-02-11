@@ -27,7 +27,7 @@ typedef rb_tree(struct extent_node) extent_tree;
 rb_proto(, extent_tree_szad_, extent_tree, struct extent_node)
 rb_proto(, extent_tree_ad_, extent_tree, struct extent_node)
 
-struct extent_node *node_alloc(void);
-void node_free(struct extent_node *node);
+struct extent_node *node_alloc(struct extent_node **free_nodes);
+void node_free(struct extent_node **free_nodes, struct extent_node *node);
 
 #endif

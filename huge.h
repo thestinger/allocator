@@ -3,8 +3,6 @@
 
 #include <stddef.h>
 
-#include "extent.h"
-
 void huge_init(void);
 void *huge_alloc(size_t size, size_t alignment);
 void huge_free(void *ptr);

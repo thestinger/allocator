@@ -7,6 +7,7 @@
 
 static extent_tree chunks_addr;
 static extent_tree chunks_size_addr;
+static struct extent_node *chunk_nodes;
 static mutex chunks_mutex = MUTEX_INITIALIZER;
 
 void chunk_init(void) {
@@ -31,7 +32,7 @@ void chunk_free(void *chunk, size_t size) {
         node->size += size;
         extent_tree_szad_insert(&chunks_size_addr, node);
     } else {
-        node = node_alloc();
+        node = node_alloc(&chunk_nodes);
         /* Coalescing forward failed, so insert a new node. */
         if (!node) {
             // Failed to allocate an extent node, so just unmap the chunk(s).
@@ -60,7 +61,7 @@ void chunk_free(void *chunk, size_t size) {
         node->size += prev->size;
         extent_tree_szad_insert(&chunks_size_addr, node);
 
-        node_free(prev);
+        node_free(&chunk_nodes, prev);
     }
 
 label_return:
@@ -107,7 +108,7 @@ static void *chunk_recycle(void *new_addr, size_t size, size_t alignment) {
     if (trailsize) {
         /* Insert the trailing space as a smaller chunk. */
         if (!node) {
-            node = node_alloc();
+            node = node_alloc(&chunk_nodes);
             if (!node) {
                 mutex_unlock(&chunks_mutex);
                 memory_decommit(ret, size);
@@ -121,10 +122,12 @@ static void *chunk_recycle(void *new_addr, size_t size, size_t alignment) {
         extent_tree_ad_insert(&chunks_addr, node);
         node = NULL;
     }
-    mutex_unlock(&chunks_mutex);
 
-    if (node)
-        node_free(node);
+    if (node) {
+        node_free(&chunk_nodes, node);
+    }
+
+    mutex_unlock(&chunks_mutex);
     return ret;
 }
 

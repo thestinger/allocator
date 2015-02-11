@@ -1,12 +1,14 @@
 #include <assert.h>
 
 #include "chunk.h"
+#include "extent.h"
 #include "huge.h"
 #include "memory.h"
 #include "mutex.h"
 
 static extent_tree huge;
 static mutex huge_mutex = MUTEX_INITIALIZER;
+static struct extent_node *huge_nodes;
 
 void huge_init(void) {
     extent_tree_ad_new(&huge);
@@ -14,19 +16,23 @@ void huge_init(void) {
 
 void *huge_alloc(size_t size, size_t alignment) {
     size_t real_size = CHUNK_CEILING(size);
-    struct extent_node *node = node_alloc();
-    if (!node) {
-        return NULL;
-    }
-    node->size = real_size;
-    node->addr = chunk_alloc(NULL, real_size, alignment);
-    if (!node->addr) {
-        node_free(node);
+    void *chunk = chunk_alloc(NULL, real_size, alignment);
+    if (!chunk) {
         return NULL;
     }
 
     mutex_lock(&huge_mutex);
+
+    struct extent_node *node = node_alloc(&huge_nodes);
+    if (!node) {
+        chunk_free(chunk, real_size);
+        mutex_unlock(&huge_mutex);
+        return NULL;
+    }
+    node->size = real_size;
+    node->addr = chunk;
     extent_tree_ad_insert(&huge, node);
+
     mutex_unlock(&huge_mutex);
 
     return node->addr;
@@ -131,12 +137,13 @@ void huge_free(void *ptr) {
     mutex_lock(&huge_mutex);
     node = extent_tree_ad_search(&huge, &key);
     assert(node);
+    size_t size = node->size;
     extent_tree_ad_remove(&huge, node);
+    node_free(&huge_nodes, node);
     mutex_unlock(&huge_mutex);
 
-    memory_decommit(ptr, node->size);
-    chunk_free(ptr, node->size);
-    node_free(node);
+    memory_decommit(ptr, size);
+    chunk_free(ptr, size);
 }
 
 size_t huge_alloc_size(void *ptr) {
