@@ -5,6 +5,7 @@
 #include "huge.h"
 #include "memory.h"
 #include "mutex.h"
+#include "util.h"
 
 static extent_tree huge;
 static mutex huge_mutex = MUTEX_INITIALIZER;
@@ -95,8 +96,8 @@ static void *huge_remap_expand(void *old_addr, size_t old_size, size_t new_size)
     //
     // https://lkml.org/lkml/2014/10/2/624
     void *extra = memory_reserve(old_addr, old_size);
-    if (extra) {
-        if (ALIGNMENT_ADDR2OFFSET(extra, CHUNK_SIZE)) {
+    if (likely(extra)) {
+        if (unlikely(extra != old_addr)) {
             memory_unmap(extra, old_size);
         } else {
             chunk_free(extra, old_size);
