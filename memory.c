@@ -5,7 +5,6 @@
 #include <unistd.h>
 
 #include "memory.h"
-#include "util.h"
 
 // use MAP_NORESERVE to get either proper memory accounting or full overcommit
 static const int map_flags = MAP_ANONYMOUS|MAP_PRIVATE|MAP_NORESERVE;
@@ -31,7 +30,7 @@ void memory_decommit(void *addr, size_t size) {
     }
 }
 
-bool memory_commit(UNUSED void *addr, UNUSED size_t size) {
+bool memory_commit(void *addr, size_t size) {
     if (reduce_commit_charge) {
         return mprotect(addr, size, PROT_READ|PROT_WRITE);
     }
