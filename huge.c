@@ -95,7 +95,7 @@ static void *huge_remap_expand(void *old_addr, size_t old_size, size_t new_size)
     // for preserving the old mapping to avoid the possibility of failing to map the right address.
     //
     // https://lkml.org/lkml/2014/10/2/624
-    void *extra = memory_reserve(old_addr, old_size);
+    void *extra = memory_map(old_addr, old_size, false);
     if (likely(extra)) {
         if (unlikely(extra != old_addr)) {
             memory_unmap(extra, old_size);

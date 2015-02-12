@@ -38,16 +38,8 @@ bool memory_commit(UNUSED void *addr, UNUSED size_t size) {
     return false;
 }
 
-void *memory_map(void *hint, size_t size) {
-    void *addr = mmap(hint, size, PROT_READ|PROT_WRITE, map_flags, -1, 0);
-    if (addr == MAP_FAILED) {
-        return NULL;
-    }
-    return addr;
-}
-
-void *memory_reserve(void *hint, size_t size) {
-    int prot = reduce_commit_charge ? PROT_NONE : PROT_READ|PROT_WRITE;
+void *memory_map(void *hint, size_t size, bool commit) {
+    int prot = !commit && reduce_commit_charge ? PROT_NONE : PROT_READ|PROT_WRITE;
     void *addr = mmap(hint, size, prot, map_flags, -1, 0);
     if (addr == MAP_FAILED) {
         return NULL;
@@ -55,12 +47,12 @@ void *memory_reserve(void *hint, size_t size) {
     return addr;
 }
 
-void *memory_map_aligned(void *hint, size_t size, size_t alignment) {
+void *memory_map_aligned(void *hint, size_t size, size_t alignment, bool commit) {
     size_t alloc_size = size + alignment - PAGE_SIZE;
     if (alloc_size < size) {
         return NULL;
     }
-    void *addr = memory_map(hint, alloc_size);
+    void *addr = memory_map(hint, alloc_size, commit);
     if (!addr) {
         return NULL;
     }

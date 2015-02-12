@@ -139,12 +139,12 @@ void *chunk_alloc(void *new_addr, size_t size, size_t alignment) {
     if (new_addr) {
         return NULL;
     }
-    if (!(ptr = memory_map(NULL, size))) {
+    if (!(ptr = memory_map(NULL, size, true))) {
         return NULL;
     }
     if (ALIGNMENT_ADDR2OFFSET(ptr, alignment)) {
         memory_unmap(ptr, size);
-        return memory_map_aligned(NULL, size, alignment);
+        return memory_map_aligned(NULL, size, alignment, true);
     }
     return ptr;
 }

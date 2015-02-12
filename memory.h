@@ -23,9 +23,8 @@
 void memory_init(void);
 void memory_decommit(void *ptr, size_t size);
 bool memory_commit(void *ptr, size_t size);
-void *memory_map(void *hint, size_t size);
-void *memory_reserve(void *hint, size_t size);
-void *memory_map_aligned(void *hint, size_t size, size_t alignment);
+void *memory_map(void *hint, size_t size, bool commit);
+void *memory_map_aligned(void *hint, size_t size, size_t alignment, bool commit);
 void memory_unmap(void *ptr, size_t size);
 bool memory_remap_fixed(void *addr, size_t old_size, void *new_addr, size_t new_size);
 

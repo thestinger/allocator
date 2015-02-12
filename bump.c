@@ -17,7 +17,7 @@ void *bump_alloc(size_t size, size_t align) {
     uintptr_t ret = ALIGNMENT_CEILING((uintptr_t)bump, align);
     if (ret + size > (uintptr_t)bump_end) {
         size_t chunk_size = CHUNK_CEILING(size);
-        void *ptr = memory_map(NULL, chunk_size);
+        void *ptr = memory_map(NULL, chunk_size, true);
         if (!ptr) {
             mutex_unlock(&bump_mutex);
             return NULL;
