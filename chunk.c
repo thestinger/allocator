@@ -82,7 +82,7 @@ static void *chunk_recycle(void *new_addr, size_t size, size_t alignment) {
     mutex_lock(&chunks_mutex);
     struct extent_node *node = new_addr ? extent_tree_ad_search(&chunks_addr, &key) :
         extent_tree_szad_nsearch(&chunks_size_addr, &key);
-    if (!node) {
+    if (!node || (new_addr && node->size < size)) {
         mutex_unlock(&chunks_mutex);
         return NULL;
     }
