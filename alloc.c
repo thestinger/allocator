@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/sysinfo.h>
 #include <unistd.h>
 
@@ -35,6 +36,14 @@
 #define MAX_SMALL 512
 #define LARGE_CHUNK_HEADER ((sizeof(struct chunk) + LARGE_MASK) & ~LARGE_MASK)
 #define MAX_LARGE (CHUNK_SIZE - (LARGE_CHUNK_HEADER + sizeof(struct large)))
+
+#if INTPTR_MAX == INT32_MAX
+#define INITIAL_VA ((size_t)256 * 1024 * 1024)
+#else
+#define INITIAL_VA ((size_t)1024 * 1024 * 1024 * 1024)
+#endif
+
+static_assert(INITIAL_VA % CHUNK_SIZE == 0, "INITIAL_VA not a multiple of CHUNK_SIZE");
 
 struct large {
     size_t size; // does not include the header
@@ -222,6 +231,15 @@ static bool malloc_init_slow(struct thread_cache *cache) {
     memory_init();
     chunk_init();
     huge_init();
+
+    struct rlimit limit;
+    if (!getrlimit(RLIMIT_AS, &limit) && limit.rlim_cur == RLIM_INFINITY) {
+        void *reserved = memory_map_aligned(NULL, INITIAL_VA, CHUNK_SIZE, false);
+        if (reserved) {
+            chunk_free(reserved, INITIAL_VA);
+        }
+    }
+
     atomic_store_explicit(&initialized, true, memory_order_release);
 
     mutex_unlock(&init_mutex);

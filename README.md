@@ -5,6 +5,9 @@
     - virtual memory managed in userspace to reduce fragmentation and overhead:
         - memory is purged with MADV_FREE/MADV_DONTNEED rather than unmapping
         - if overcommit is disabled, commit charge is dropped via PROT_NONE
+        - a large contiguous span of address space is reserved if there is no
+          address space resource limit, preventing any holes and improving long
+          term memory compaction from address ordering
     - node for each span of free chunks:
         - intrusive tree ordered by (size, addr) for address-ordered best-fit
         - intrusive tree ordered by (addr,) for coalescing
