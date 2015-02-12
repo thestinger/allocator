@@ -92,6 +92,7 @@ static void *chunk_recycle(void *new_addr, size_t size, size_t alignment) {
     size_t trailsize = node->size - leadsize - size;
     void *ret = (void *)((uintptr_t)node->addr + leadsize);
     if (memory_commit(ret, size)) {
+        mutex_unlock(&chunks_mutex);
         return NULL;
     }
 
