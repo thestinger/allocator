@@ -29,8 +29,8 @@ bool mutex_trylock(mutex *m) {
 
 void mutex_lock(mutex *m) {
     int expected = 0;
-    if (!atomic_compare_exchange_strong_explicit(m, &expected, 1, memory_order_acquire,
-                                                 memory_order_relaxed)) {
+    if (unlikely(!atomic_compare_exchange_strong_explicit(m, &expected, 1, memory_order_acquire,
+                                                          memory_order_relaxed))) {
         if (expected != 2) {
             expected = atomic_exchange_explicit(m, 2, memory_order_acquire);
         }
@@ -42,7 +42,7 @@ void mutex_lock(mutex *m) {
 }
 
 void mutex_unlock(mutex *m) {
-    if (atomic_fetch_sub_explicit(m, 1, memory_order_release) != 1) {
+    if (unlikely(atomic_fetch_sub_explicit(m, 1, memory_order_release) != 1)) {
         atomic_store_explicit(m, 0, memory_order_release);
         sys_futex(m, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
     }
