@@ -129,6 +129,10 @@ struct thread_cache {
 __attribute__((tls_model("initial-exec")))
 static thread_local struct thread_cache tcache = {{NULL}, {}, -1, true};
 
+static inline struct slab *to_slab(void *ptr) {
+    return ALIGNMENT_ADDR2BASE(ptr, SLAB_SIZE);
+}
+
 static void slab_deallocate(struct arena *arena, struct slab *slab, struct slot *ptr, size_t bin);
 
 static void tcache_destroy(void *key) {
@@ -149,8 +153,7 @@ static void tcache_destroy(void *key) {
                         mutex_lock(&arena->mutex);
                         locked = true;
                     }
-                    struct slab *slab = ALIGNMENT_ADDR2BASE(slot, SLAB_SIZE);
-                    slab_deallocate(arena, slab, slot, bin);
+                    slab_deallocate(arena, to_slab(slot), slot, bin);
                     *last_next = next;
                 } else {
                     last_next = &slot->next;
@@ -626,7 +629,7 @@ static inline void *allocate(struct thread_cache *cache, size_t size) {
 
 static void deallocate_small(struct thread_cache *cache, void *ptr) {
     struct slot *slot = ptr;
-    struct slab *slab = ALIGNMENT_ADDR2BASE(slot, SLAB_SIZE);
+    struct slab *slab = to_slab(slot);
     size_t size = slab->size;
     size_t bin = size2bin(size);
 
@@ -672,8 +675,7 @@ static void deallocate_small(struct thread_cache *cache, void *ptr) {
                 struct chunk *chunk = CHUNK_ADDR2BASE(slot);
                 assert(chunk->small);
                 if (chunk->arena == arena_index) {
-                    struct slab *slab = ALIGNMENT_ADDR2BASE(slot, SLAB_SIZE);
-                    slab_deallocate(arena, slab, slot, bin);
+                    slab_deallocate(arena, to_slab(slot), slot, bin);
                     slot = slot->next;
                 } else {
                     slot->next = flush;
@@ -722,8 +724,7 @@ static size_t alloc_size(void *ptr) {
         return huge_alloc_size(ptr);
     }
     if (chunk->small) {
-        struct slab *slab = ALIGNMENT_ADDR2BASE(ptr, SLAB_SIZE);
-        return slab->size;
+        return to_slab(ptr)->size;
     }
     return to_head(ptr)->size;
 }
