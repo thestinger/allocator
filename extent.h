@@ -3,13 +3,13 @@
 
 #define RB_COMPACT
 
-#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <unistd.h>
 
 #include "rb.h"
+#include "util.h"
 
 struct extent_node {
     union {

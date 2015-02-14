@@ -1,6 +1,5 @@
 #define RB_COMPACT
 
-#include <assert.h>
 #include <errno.h>
 #include <pthread.h>
 #include <sched.h>

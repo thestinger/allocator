@@ -1,9 +1,8 @@
-#include <assert.h>
-
 #include "bump.h"
 #include "chunk.h"
 #include "memory.h"
 #include "mutex.h"
+#include "util.h"
 
 static mutex bump_mutex = MUTEX_INITIALIZER;
 static void *bump;

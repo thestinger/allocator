@@ -1,7 +1,15 @@
 #ifndef UTIL_H
 #define UTIL_H
 
-#include <stddef.h>
+#include <assert.h>
+#include <stdlib.h>
+
+#undef assert
+#ifdef NDEBUG
+#define assert(expr) ((void)0)
+#else
+#define assert(expr) (likely(expr) ? (void)0 : abort())
+#endif
 
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)

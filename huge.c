@@ -1,5 +1,3 @@
-#include <assert.h>
-
 #include "chunk.h"
 #include "extent.h"
 #include "huge.h"

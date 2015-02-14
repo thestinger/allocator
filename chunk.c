@@ -1,9 +1,8 @@
-#include <assert.h>
-
 #include "chunk.h"
 #include "extent.h"
 #include "memory.h"
 #include "mutex.h"
+#include "util.h"
 
 static extent_tree chunks_addr;
 static extent_tree chunks_size_addr;
@@ -71,7 +70,7 @@ label_return:
 static void *chunk_recycle(void *new_addr, size_t size, size_t alignment) {
     size_t alloc_size = size + alignment - CHUNK_SIZE;
 
-    assert(!new_addr || alignment == chunksize);
+    assert(!new_addr || alignment == CHUNK_SIZE);
 
     /* Beware size_t wrap-around. */
     if (alloc_size < size)
