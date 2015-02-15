@@ -39,7 +39,7 @@ void *huge_alloc(size_t size, size_t alignment) {
     return node->addr;
 }
 
-static void huge_no_move_shrink(void *ptr, size_t old_size, size_t new_size) {
+static void huge_update_size(void *ptr, size_t new_size) {
     struct extent_node key;
     key.addr = ptr;
 
@@ -48,37 +48,26 @@ static void huge_no_move_shrink(void *ptr, size_t old_size, size_t new_size) {
     assert(node);
     node->size = new_size;
     mutex_unlock(&huge_mutex);
+}
 
-    void *excess_addr = (char *)node->addr + new_size;
+static void huge_no_move_shrink(void *ptr, size_t old_size, size_t new_size) {
+    void *excess_addr = (char *)ptr + new_size;
     size_t excess_size = old_size - new_size;
 
     memory_decommit(excess_addr, excess_size);
     chunk_free(excess_addr, excess_size);
+    huge_update_size(ptr, new_size);
 }
 
 static bool huge_no_move_expand(void *ptr, size_t old_size, size_t new_size) {
-    struct extent_node key;
-    key.addr = ptr;
-
-    mutex_lock(&huge_mutex);
-    struct extent_node *node = extent_tree_ad_search(&huge, &key);
-    assert(node);
-    mutex_unlock(&huge_mutex);
-
     void *expand_addr = (char *)ptr + old_size;
     size_t expand_size = new_size - old_size;
 
-    void *trail = chunk_alloc(expand_addr, expand_size, CHUNK_SIZE);
-    if (!trail) {
-        return true;
+    if (chunk_alloc(expand_addr, expand_size, CHUNK_SIZE)) {
+        huge_update_size(ptr, new_size);
+        return false;
     }
-    assert(trail == expand_addr);
-
-    mutex_lock(&huge_mutex);
-    node->size = new_size;
-    mutex_unlock(&huge_mutex);
-
-    return false;
+    return true;
 }
 
 static void *huge_move_expand(void *old_addr, size_t old_size, size_t new_size) {
