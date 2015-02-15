@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "chunk.h"
 #include "extent.h"
 #include "huge.h"
@@ -79,26 +81,28 @@ static bool huge_no_move_expand(void *ptr, size_t old_size, size_t new_size) {
     return false;
 }
 
-static void *huge_remap_expand(void *old_addr, size_t old_size, size_t new_size) {
+static void *huge_move_expand(void *old_addr, size_t old_size, size_t new_size) {
     void *new_addr = chunk_alloc(NULL, new_size, CHUNK_SIZE);
     if (!new_addr) {
         return NULL;
     }
 
-    if (memory_remap_fixed(old_addr, old_size, new_addr, new_size)) {
-        return NULL;
-    }
-
-    // Attempt to fill the virtual memory hole created by mremap. The kernel should provide a flag
-    // for preserving the old mapping to avoid the possibility of failing to map the right address.
-    //
-    // https://lkml.org/lkml/2014/10/2/624
-    void *extra = memory_map(old_addr, old_size, false);
-    if (likely(extra)) {
-        if (unlikely(extra != old_addr)) {
-            memory_unmap(extra, old_size);
-        } else {
-            chunk_free(extra, old_size);
+    if (unlikely(memory_remap_fixed(old_addr, old_size, new_addr, new_size))) {
+        memcpy(new_addr, old_addr, old_size);
+        memory_decommit(old_addr, old_size);
+        chunk_free(old_addr, old_size);
+    } else {
+        // Attempt to fill the virtual memory hole. The kernel should provide a flag for preserving
+        // the old mapping to avoid the possibility of this failing and creating fragmentation.
+        //
+        // https://lkml.org/lkml/2014/10/2/624
+        void *extra = memory_map(old_addr, old_size, false);
+        if (likely(extra)) {
+            if (unlikely(extra != old_addr)) {
+                memory_unmap(extra, old_size);
+            } else {
+                chunk_free(extra, old_size);
+            }
         }
     }
 
@@ -122,7 +126,7 @@ void *huge_realloc(void *ptr, size_t old_size, size_t new_real_size) {
         if (!huge_no_move_expand(ptr, old_size, new_real_size)) {
             return ptr;
         }
-        return huge_remap_expand(ptr, old_size, new_real_size);
+        return huge_move_expand(ptr, old_size, new_real_size);
     } else if (new_real_size < old_size) {
         huge_no_move_shrink(ptr, old_size, new_real_size);
     }
