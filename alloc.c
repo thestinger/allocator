@@ -611,7 +611,8 @@ static bool large_realloc_no_move(void *ptr, size_t old_size, size_t new_size) {
 
 static inline void *allocate(struct thread_cache *cache, size_t size) {
     if (size <= MAX_SMALL) {
-        size_t real_size = (size + 15) & ~15;
+        size_t non_zero_size = size | (!size);
+        size_t real_size = (non_zero_size + 15) & ~15;
         return allocate_small(cache, real_size);
     }
 
