@@ -45,7 +45,7 @@
 static_assert(INITIAL_VA % CHUNK_SIZE == 0, "INITIAL_VA not a multiple of CHUNK_SIZE");
 
 struct large {
-    size_t size; // does not include the header
+    size_t size;
     void *prev;
     rb_node(struct large) link_size_addr;
     max_align_t data[];
