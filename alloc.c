@@ -485,13 +485,13 @@ static struct large *large_recycle(struct arena *arena, size_t size, size_t alig
     // Remove free span from the tree.
     large_tree_size_addr_remove(&arena->large_size_addr, span);
     if (leadsize) {
-        // Insert the leading space as a smaller chunk.
+        // Insert the leading space as a smaller span.
         span->size = leadsize;
         large_tree_size_addr_insert(&arena->large_size_addr, span);
         update_next_span(span, span->size);
     }
     if (trailsize) {
-        // Insert the trailing space as a smaller chunk.
+        // Insert the trailing space as a smaller span.
         struct large *trail = (struct large *)((char *)head + full_size);
         trail->size = trailsize;
         large_tree_size_addr_insert(&arena->large_size_addr, trail);
@@ -568,7 +568,7 @@ static bool large_expand_recycle(struct arena *arena, void *new_addr, size_t siz
 
     size_t trailsize = next->size - size;
     if (trailsize) {
-        // Insert the trailing space as a smaller chunk.
+        // Insert the trailing space as a smaller span.
         struct large *trail = (struct large *)((char *)next + size);
         trail->size = trailsize;
         large_tree_size_addr_insert(&arena->large_size_addr, trail);
