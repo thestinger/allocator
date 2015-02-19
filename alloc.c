@@ -731,22 +731,25 @@ static size_t alloc_size(void *ptr) {
     return to_head(ptr)->size;
 }
 
+static int alloc_aligned_result(void **memptr, void *ptr) {
+    if (unlikely(!ptr)) {
+        return ENOMEM;
+    }
+    *memptr = ptr;
+    return 0;
+}
+
 static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t min_alignment) {
     assert(min_alignment != 0);
-
-    struct thread_cache *cache = &tcache;
 
     if (unlikely((alignment - 1) & alignment || alignment < min_alignment)) {
         return EINVAL;
     }
 
+    struct thread_cache *cache = &tcache;
+
     if (alignment <= MIN_ALIGN) {
-        void *ptr = allocate(cache, size);
-        if (unlikely(!ptr)) {
-            return ENOMEM;
-        }
-        *memptr = ptr;
-        return 0;
+        return alloc_aligned_result(memptr, allocate(cache, size));
     }
 
     size_t worst_large_size = size + alignment - MIN_ALIGN;
@@ -760,20 +763,9 @@ static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t mi
 
     if (worst_large_size < MAX_LARGE) {
         size_t real_size = (size + LARGE_MASK) & ~LARGE_MASK;
-        void *ptr = allocate_large(cache, real_size, alignment);
-        if (unlikely(!ptr)) {
-            return ENOMEM;
-        }
-        *memptr = ptr;
-        return 0;
+        return alloc_aligned_result(memptr, allocate_large(cache, real_size, alignment));
     }
-
-    void *ptr = huge_alloc(size, CHUNK_CEILING(alignment));
-    if (unlikely(!ptr)) {
-        return ENOMEM;
-    }
-    *memptr = ptr;
-    return 0;
+    return alloc_aligned_result(memptr, huge_alloc(size, CHUNK_CEILING(alignment)));
 }
 
 static void *alloc_aligned_simple(size_t alignment, size_t size) {
