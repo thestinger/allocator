@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <malloc.h>
 #include <sched.h>
 #include <stdalign.h>
 #include <stdatomic.h>
@@ -858,6 +859,8 @@ EXPORT void free(void *ptr) {
     deallocate(&tcache, ptr);
 }
 
+EXPORT void cfree(void *ptr) __attribute__((alias("free")));
+
 EXPORT int posix_memalign(void **memptr, size_t alignment, size_t size) {
     return alloc_aligned(memptr, alignment, size, sizeof(void *));
 }
@@ -886,4 +889,30 @@ EXPORT void *pvalloc(size_t size) {
 
 EXPORT size_t malloc_usable_size(void *ptr) {
     return alloc_size(ptr);
+}
+
+EXPORT int malloc_trim(UNUSED size_t pad) {
+    return 0;
+}
+
+EXPORT void malloc_stats(void) {}
+
+EXPORT struct mallinfo mallinfo(void) {
+    return (struct mallinfo){0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+}
+
+EXPORT int mallopt(UNUSED int param, UNUSED int value) {
+    return 1;
+}
+
+EXPORT int malloc_info(UNUSED int options, UNUSED FILE *fp) {
+    return ENOSYS;
+}
+
+EXPORT void *malloc_get_state(void) {
+    return NULL;
+}
+
+EXPORT int malloc_set_state(UNUSED void *state) {
+    return -2;
 }
