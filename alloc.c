@@ -184,7 +184,7 @@ static void thread_init(struct thread_cache *cache) {
 }
 
 static bool malloc_init_slow(struct thread_cache *cache) {
-    if (atomic_load_explicit(&initialized, memory_order_consume)) {
+    if (likely(atomic_load_explicit(&initialized, memory_order_consume))) {
         thread_init(cache);
         return false;
     }
