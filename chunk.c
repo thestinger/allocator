@@ -9,7 +9,7 @@ static extent_tree chunks_size_addr;
 static struct extent_node *chunk_nodes;
 static mutex chunks_mutex = MUTEX_INITIALIZER;
 
-void chunk_init(void) {
+COLD void chunk_init(void) {
     extent_tree_ad_new(&chunks_addr);
     extent_tree_szad_new(&chunks_size_addr);
 }

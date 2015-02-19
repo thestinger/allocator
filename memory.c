@@ -5,12 +5,13 @@
 #include <unistd.h>
 
 #include "memory.h"
+#include "util.h"
 
 // use MAP_NORESERVE to get either proper memory accounting or full overcommit
 static const int map_flags = MAP_ANONYMOUS|MAP_PRIVATE|MAP_NORESERVE;
 static bool reduce_commit_charge = true;
 
-void memory_init(void) {
+COLD void memory_init(void) {
     int overcommit = open("/proc/sys/vm/overcommit_memory", O_RDONLY|O_CLOEXEC);
     if (overcommit != -1) {
         char digit;

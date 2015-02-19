@@ -11,7 +11,7 @@ static extent_tree huge;
 static mutex huge_mutex = MUTEX_INITIALIZER;
 static struct extent_node *huge_nodes;
 
-void huge_init(void) {
+COLD void huge_init(void) {
     extent_tree_ad_new(&huge);
 }
 

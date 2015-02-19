@@ -15,6 +15,7 @@
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #define UNUSED __attribute__((unused))
 #define EXPORT __attribute__((visibility("default")))
+#define COLD __attribute__((cold))
 
 static inline bool size_mul_overflow(size_t a, size_t b, size_t *result) {
 #if defined(__clang__) || __GNUC__ >= 5

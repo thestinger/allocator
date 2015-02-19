@@ -891,28 +891,28 @@ EXPORT size_t malloc_usable_size(void *ptr) {
     return alloc_size(ptr);
 }
 
-EXPORT int malloc_trim(UNUSED size_t pad) {
+COLD EXPORT int malloc_trim(UNUSED size_t pad) {
     return 0;
 }
 
-EXPORT void malloc_stats(void) {}
+COLD EXPORT void malloc_stats(void) {}
 
-EXPORT struct mallinfo mallinfo(void) {
+COLD EXPORT struct mallinfo mallinfo(void) {
     return (struct mallinfo){0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 }
 
-EXPORT int mallopt(UNUSED int param, UNUSED int value) {
+COLD EXPORT int mallopt(UNUSED int param, UNUSED int value) {
     return 1;
 }
 
-EXPORT int malloc_info(UNUSED int options, UNUSED FILE *fp) {
+COLD EXPORT int malloc_info(UNUSED int options, UNUSED FILE *fp) {
     return ENOSYS;
 }
 
-EXPORT void *malloc_get_state(void) {
+COLD EXPORT void *malloc_get_state(void) {
     return NULL;
 }
 
-EXPORT int malloc_set_state(UNUSED void *state) {
+COLD EXPORT int malloc_set_state(UNUSED void *state) {
     return -2;
 }
