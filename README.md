@@ -26,8 +26,11 @@
     - allocation headers for freeing allocations and coalescing:
         - find the next span with `addr + size` for forward coalescing
         - maintain a pointer to the previous span for backward coalescing
+        - spans must be a multiple of the header size, which is 4x pointer-size
+        - headers act as spacers and prevent false sharing with 64-bit pointers
+          and 64 byte cachelines
     - intrusive tree keyed by (size, addr) for address-ordered best-fit
-        - the span headers are the tree nodes, making them 4x pointer size
+        - the span headers are the tree nodes
     - chunks are released when a free span covers the entire usable area
 
 - small allocations:

@@ -29,6 +29,7 @@
 
 #define CACHELINE 64
 #define N_CLASS 32
+#define LARGE_ALIGN (sizeof(struct large))
 #define LARGE_MASK (sizeof(struct large) - 1)
 #define MIN_ALIGN 16
 #define SLAB_SIZE (64 * 1024)
@@ -466,7 +467,7 @@ static void large_free(struct arena *arena, void *span, size_t size) {
 
 static struct large *large_recycle(struct arena *arena, size_t size, size_t alignment) {
     size_t full_size = size + sizeof(struct large);
-    size_t alloc_size = full_size + alignment - MIN_ALIGN;
+    size_t alloc_size = full_size + alignment - LARGE_ALIGN;
     assert(alloc_size >= full_size);
     struct large key;
     key.size = alloc_size;
@@ -505,6 +506,8 @@ static struct large *large_recycle(struct arena *arena, size_t size, size_t alig
 }
 
 static void *allocate_large(struct thread_cache *cache, size_t size, size_t alignment) {
+    assert(alignment >= LARGE_ALIGN);
+
     struct arena *arena = get_arena(cache);
 
     struct large *head = large_recycle(arena, size, alignment);
@@ -623,7 +626,7 @@ static inline void *allocate(struct thread_cache *cache, size_t size) {
 
     if (size <= MAX_LARGE) {
         size_t real_size = (size + LARGE_MASK) & ~LARGE_MASK;
-        return allocate_large(cache, real_size, MIN_ALIGN);
+        return allocate_large(cache, real_size, LARGE_ALIGN);
     }
 
     return huge_alloc(size, CHUNK_SIZE);
@@ -752,7 +755,10 @@ static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t mi
         return alloc_aligned_result(memptr, allocate(cache, size));
     }
 
-    size_t worst_large_size = size + alignment - MIN_ALIGN;
+    size_t non_zero_size = size | (!size);
+    size_t large_size = (non_zero_size + LARGE_MASK) & ~LARGE_MASK;
+    size_t large_alignment = (alignment + LARGE_MASK) & ~LARGE_MASK;
+    size_t worst_large_size = large_size + large_alignment - LARGE_ALIGN;
     if (unlikely(worst_large_size < size)) {
         return ENOMEM;
     }
@@ -761,9 +767,8 @@ static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t mi
         return ENOMEM;
     }
 
-    if (worst_large_size < MAX_LARGE) {
-        size_t real_size = (size + LARGE_MASK) & ~LARGE_MASK;
-        return alloc_aligned_result(memptr, allocate_large(cache, real_size, alignment));
+    if (worst_large_size <= MAX_LARGE) {
+        return alloc_aligned_result(memptr, allocate_large(cache, large_size, large_alignment));
     }
     return alloc_aligned_result(memptr, huge_alloc(size, CHUNK_CEILING(alignment)));
 }
