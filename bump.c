@@ -22,7 +22,7 @@ void *bump_alloc(size_t size, size_t align) {
             return NULL;
         }
         bump = ptr;
-        bump_end = ptr + chunk_size;
+        bump_end = (char *)ptr + chunk_size;
         ret = (uintptr_t)ptr;
     }
 

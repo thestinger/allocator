@@ -129,7 +129,7 @@ struct thread_cache {
 };
 
 __attribute__((tls_model("initial-exec")))
-static thread_local struct thread_cache tcache = {{NULL}, {}, -1, true};
+static thread_local struct thread_cache tcache = {{NULL}, {0}, -1, true};
 
 static inline struct slab *to_slab(void *ptr) {
     return ALIGNMENT_ADDR2BASE(ptr, SLAB_SIZE);
@@ -545,7 +545,7 @@ static void *allocate_large(struct thread_cache *cache, size_t size, size_t alig
     void *end = (char *)head->data + size;
     void *chunk_end = (char *)chunk + CHUNK_SIZE;
     if (end != chunk_end) {
-        large_free(arena, end, chunk_end - end);
+        large_free(arena, end, (char *)chunk_end - (char *)end);
     }
 
     mutex_unlock(&arena->mutex);
