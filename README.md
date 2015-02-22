@@ -1,16 +1,79 @@
 ## Current implementation
 
-- low-memory memory management:
-    - naturally aligned chunks as the fundamental building block
-    - virtual memory managed in userspace to reduce fragmentation and overhead:
-        - memory is purged with MADV_FREE/MADV_DONTNEED rather than unmapping
-        - if overcommit is disabled, commit charge is dropped via PROT_NONE
-        - a large contiguous span of address space is reserved if there is no
-          address space resource limit, preventing any holes and improving long
-          term memory compaction from address ordering
-    - node for each span of free chunks:
-        - intrusive tree ordered by (size, addr) for address-ordered best-fit
-        - intrusive tree ordered by (addr,) for coalescing
+### Low-level memory management
+
+Chunks are the fundamental building block for all memory allocations. In the
+current implementation, the chunks are 4MiB blocks with 4MiB alignment.
+
+Rather than unmapping chunks, extents of free chunks are managed in userspace
+to reduce fragmentation, system call overhead and synchronization.
+
+Extents of free chunks are managed via address-ordered best-fit, which greatly
+reduces overall fragmentation and provides logarithmic time complexity for
+every case where the peak virtual memory doesn't need to be increased. A node
+is used to represent each extent, with one intrusive tree for keyed by (size,
+address) for allocation and another keyed by address for coalescing.
+
+If there is no address space resource limit, a large portion of the address
+space is reserved up-front for a stronger time complexity guarantee and more
+compaction from the address ordering.
+
+The system calls for managing mappings (mmap, mprotect, munmap) require taking
+the global mmap_sem lock as writers, while page faults and madvise purging use
+concurrent reader access. Doing the work in userspace avoids getting in the way
+of page faults and is significantly cheaper.
+
+The Linux kernel also lacks an ordering by size, so it has to use an ugly
+heuristic for allocation rather than best-fit. It allocates below the lowest
+mapping so far if there and room and then falls back to an O(n) scan. This
+leaves behind gaps when anything but the lowest mapping is freed, increasing
+the rate of TLB misses.
+
+Natural alignment for chunks provides the ability to distinguish between
+allocations smaller and larger than the chunk size from the addresses, which
+leads to the ability to find metadata in O(1) time. Note that it is currently
+O(log n) for huge allocations, but it doesn't have to be. As long as the chunk
+size remains a multiple of the transparent huge page size (2MiB), there is also
+the benefit of huge pages being able to back every allocation.
+
+### Decommit / purging
+
+When overcommit is enabled, memory is released back to the operating system
+with MADV_FREE, or MADV_DONTNEED if the superior lazy MADV_FREE is unavailable.
+
+When overcommit is disabled, commit charge is dropped by setting PROT_NONE on
+the mappings in addition to purging.
+
+The ability to opt-in to lightweight purging even without overcommit enabled or
+to disable purging completely will be exposed in the future.
+
+On Windows, the usage of PROT_NONE maps directly to MEM_COMMIT and MEM_DECOMMIT
+while MADV_FREE is the same as MEM_RESET.
+
+Purging is currently only implemented at a chunk level and does not perform the
+work lazily (beyond MADV_FREE lazily dropping pages). The intention is to track
+dirty prefixes in free spans of memory, with lazy purging in FIFO order. The
+same purging strategy can be used for small, large and chunk allocation.
+
+There will be a minimum permitted amount of dirty memory per-arena before
+purging is used along with a ratio of active:dirty pages.
+
+Coalescing a freed span with a free span succeeding it will be painless, while
+coalescing with a preceding span that is not entirely dirty will need to use a
+heuristic to choose between considering the whole span dirty or purging the new
+space and leaving it clean. The address-ordered best-fit algorithm plays well
+with dirty prefixes because spans with lower addresses are preferred. Using
+first-fit would likely synergize even more, but at the expense of increasing
+fragmentation which is what this design tries to avoid in the first place.
+
+The alternative would be segregating clean and dirty memory entirely, but this
+would create a new form of fragmentation. It may be tested in the future, but
+it is expected that the chosen design will be faster overall without the need
+to pay the cost of fragmenting the memory. Tracking the dirty spans could be
+done precisely without segregating the memory, but it would be more complex and
+more time would be spent managing metadata.
+
+### Rest of the implementation
 
 - major allocation classes:
     - huge: spans of chunks, always chunk-aligned
