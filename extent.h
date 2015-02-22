@@ -11,6 +11,8 @@
 #include "rb.h"
 #include "util.h"
 
+struct chunk_recycler;
+
 struct extent_node {
     union {
         struct {

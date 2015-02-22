@@ -16,7 +16,10 @@ address) for allocation and another keyed by address for coalescing.
 
 If there is no address space resource limit, a large portion of the address
 space is reserved up-front for a stronger time complexity guarantee and more
-compaction from the address ordering.
+compaction from the address ordering. The reserved memory is partitioned
+between each core for parallel chunk allocation, falling back to the global
+data structure only when it runs out. On 64-bit, this means that there are no
+global resources preventing linear scaling as the reserved mapping is enormous.
 
 The system calls for managing mappings (mmap, mprotect, munmap) require taking
 the global mmap_sem lock as writers, while page faults and madvise purging use

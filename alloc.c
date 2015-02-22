@@ -15,6 +15,7 @@
 #include <sys/sysinfo.h>
 #include <unistd.h>
 
+#include "arena.h"
 #include "bump.h"
 #include "chunk.h"
 #include "huge.h"
@@ -27,7 +28,6 @@
 #define thread_local _Thread_local
 #endif
 
-#define N_CLASS 32
 #define LARGE_ALIGN (sizeof(struct large))
 #define LARGE_MASK (sizeof(struct large) - 1)
 #define MIN_ALIGN 16
@@ -44,16 +44,6 @@
 #endif
 
 static_assert(INITIAL_VA % CHUNK_SIZE == 0, "INITIAL_VA not a multiple of CHUNK_SIZE");
-
-struct large {
-    size_t size;
-    void *prev;
-    rb_node(struct large) link_size_addr;
-    max_align_t data[];
-};
-
-typedef rb_tree(struct large) large_tree;
-rb_proto(, large_tree_size_addr_, large_tree, struct large)
 
 static int large_addr_comp(struct large *a, struct large *b) {
     uintptr_t a_addr = (uintptr_t)a;
@@ -75,42 +65,6 @@ static int large_size_addr_comp(struct large *a, struct large *b) {
 
 rb_gen(, large_tree_size_addr_, large_tree, struct large, link_size_addr, large_size_addr_comp)
 
-struct slot {
-    struct slot *next;
-    uint8_t data[];
-};
-
-struct slab {
-    struct slab *next;
-    struct slab *prev;
-
-    size_t size;
-    struct slot *next_slot;
-    struct slot *end;
-
-    uint16_t count;
-    uint8_t data[];
-};
-
-struct chunk {
-    int arena;
-    bool small;
-    max_align_t data[];
-};
-
-struct arena {
-    alignas(CACHELINE) mutex mutex;
-
-    // intrusive singly-linked list
-    struct slab *free_slab;
-
-    // intrusive circular doubly-linked list, with this sentinel node at both ends
-    struct slab partial_slab[N_CLASS];
-
-    large_tree large_size_addr;
-    struct chunk *free_chunk;
-};
-
 static bool init_failed = false;
 static atomic_bool initialized = ATOMIC_VAR_INIT(false);
 static mutex init_mutex = MUTEX_INITIALIZER;
@@ -118,17 +72,23 @@ static mutex init_mutex = MUTEX_INITIALIZER;
 static struct arena *arenas;
 static int n_arenas = 0;
 
-static pthread_key_t tcache_key;
+static void *reserved_start;
+static void *reserved_end;
 
-struct thread_cache {
-    struct slot *bin[N_CLASS];
-    size_t bin_size[N_CLASS];
-    int arena_index; // -1 if uninitialized
-    bool dead; // true if destroyed or uninitialized
-};
+static pthread_key_t tcache_key;
 
 __attribute__((tls_model("initial-exec")))
 static thread_local struct thread_cache tcache = {{NULL}, {0}, -1, true};
+
+struct arena *get_huge_arena(void *ptr) {
+    if (ptr >= reserved_start && ptr < reserved_end) {
+        size_t diff = (char *)ptr - (char *)reserved_start;
+        size_t arena_initial_va = (INITIAL_VA / n_arenas) & ~CHUNK_MASK;
+        size_t arena_index = diff / arena_initial_va;
+        return arenas + arena_index;
+    }
+    return NULL;
+}
 
 static inline struct slab *to_slab(void *ptr) {
     return ALIGNMENT_ADDR2BASE(ptr, SLAB_SIZE);
@@ -215,6 +175,22 @@ static bool malloc_init_slow(struct thread_cache *cache) {
         return true;
     }
 
+    memory_init();
+    chunk_init();
+    huge_init();
+
+    struct rlimit limit;
+    void *reserved = NULL;
+    size_t arena_initial_va = (INITIAL_VA / n_arenas) & ~CHUNK_MASK;
+    size_t total_initial_va = arena_initial_va * n_arenas;
+    if (!getrlimit(RLIMIT_AS, &limit) && limit.rlim_cur == RLIM_INFINITY) {
+        reserved = memory_map_aligned(NULL, total_initial_va, CHUNK_SIZE, false);
+        if (reserved) {
+            reserved_start = reserved;
+            reserved_end = (char *)reserved + total_initial_va;
+        }
+    }
+
     for (int i = 0; i < n_arenas; i++) {
         struct arena *arena = &arenas[i];
         if (mutex_init(&arena->mutex)) {
@@ -222,24 +198,19 @@ static bool malloc_init_slow(struct thread_cache *cache) {
             mutex_unlock(&init_mutex);
             return true;
         }
-        large_tree_size_addr_new(&arena->large_size_addr);
         for (size_t bin = 0; bin < N_CLASS; bin++) {
 #ifndef NDEBUG
             arena->partial_slab[bin].prev = (struct slab *)0xdeadbeef;
 #endif
             arena->partial_slab[bin].next = &arena->partial_slab[bin];
         }
-    }
+        large_tree_size_addr_new(&arena->large_size_addr);
 
-    memory_init();
-    chunk_init();
-    huge_init();
-
-    struct rlimit limit;
-    if (!getrlimit(RLIMIT_AS, &limit) && limit.rlim_cur == RLIM_INFINITY) {
-        void *reserved = memory_map_aligned(NULL, INITIAL_VA, CHUNK_SIZE, false);
+        chunk_recycler_init(&arena->chunks);
         if (reserved) {
-            chunk_free(reserved, INITIAL_VA);
+            chunk_free(&arena->chunks, reserved, arena_initial_va);
+            arena->chunks_start = reserved;
+            reserved = arena->chunks_end = (char *)reserved + arena_initial_va;
         }
     }
 
@@ -257,7 +228,7 @@ static bool malloc_init(struct thread_cache *cache) {
     return malloc_init_slow(cache);
 }
 
-static struct arena *get_arena(struct thread_cache *cache) {
+struct arena *get_arena(struct thread_cache *cache) {
     if (unlikely(mutex_trylock(&arenas[cache->arena_index].mutex))) {
         pick_arena(cache);
         mutex_lock(&arenas[cache->arena_index].mutex);
@@ -265,19 +236,31 @@ static struct arena *get_arena(struct thread_cache *cache) {
     return &arenas[cache->arena_index];
 }
 
-static struct chunk *arena_chunk_alloc(struct arena *arena) {
+static void *arena_chunk_alloc(struct arena *arena) {
     if (arena->free_chunk) {
         struct chunk *chunk = arena->free_chunk;
         arena->free_chunk = NULL;
         return chunk;
     }
+    void *chunk = chunk_recycle(&arena->chunks, NULL, CHUNK_SIZE, CHUNK_SIZE);
+    if (chunk) {
+        if (unlikely(memory_commit(chunk, CHUNK_SIZE))) {
+            chunk_free(&arena->chunks, chunk, CHUNK_SIZE);
+            return NULL;
+        }
+        return chunk;
+    }
     return chunk_alloc(NULL, CHUNK_SIZE, CHUNK_SIZE);
 }
 
-static void arena_chunk_free(struct arena *arena, struct chunk *chunk) {
+static void arena_chunk_free(struct arena *arena, void *chunk) {
     if (arena->free_chunk) {
         memory_decommit(arena->free_chunk, CHUNK_SIZE);
-        chunk_free(arena->free_chunk, CHUNK_SIZE);
+        if (chunk >= arena->chunks_start && chunk < arena->chunks_end) {
+            chunk_free(&arena->chunks, arena->free_chunk, CHUNK_SIZE);
+        } else {
+            chunk_free(NULL, arena->free_chunk, CHUNK_SIZE);
+        }
     }
     arena->free_chunk = chunk;
 }
@@ -627,8 +610,7 @@ static inline void *allocate(struct thread_cache *cache, size_t size) {
         size_t real_size = (size + LARGE_MASK) & ~LARGE_MASK;
         return allocate_large(cache, real_size, LARGE_ALIGN);
     }
-
-    return huge_alloc(size, CHUNK_SIZE);
+    return huge_alloc(cache, size, CHUNK_SIZE);
 }
 
 static void deallocate_small(struct thread_cache *cache, void *ptr) {
@@ -769,7 +751,7 @@ static int alloc_aligned(void **memptr, size_t alignment, size_t size, size_t mi
     if (worst_large_size <= MAX_LARGE) {
         return alloc_aligned_result(memptr, allocate_large(cache, large_size, large_alignment));
     }
-    return alloc_aligned_result(memptr, huge_alloc(size, CHUNK_CEILING(alignment)));
+    return alloc_aligned_result(memptr, huge_alloc(cache, size, CHUNK_CEILING(alignment)));
 }
 
 static void *alloc_aligned_simple(size_t alignment, size_t size) {
@@ -824,7 +806,7 @@ EXPORT void *realloc(void *ptr, size_t size) {
     size_t old_size = alloc_size(ptr);
 
     if (old_size > MAX_LARGE && size > MAX_LARGE) {
-        return huge_realloc(ptr, old_size, CHUNK_CEILING(size));
+        return huge_realloc(cache, ptr, old_size, CHUNK_CEILING(size));
     }
 
     size_t real_size = (size + 15) & ~15;

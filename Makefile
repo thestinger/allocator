@@ -21,11 +21,11 @@ test_small: test_small.c $(OBJECTS)
 test_large: test_large.c $(OBJECTS)
 test_huge: test_huge.c $(OBJECTS)
 
-alloc.o: alloc.c bump.h chunk.h chunk.h huge.h memory.h mutex.h util.h
+alloc.o: alloc.c arena.h bump.h chunk.h chunk.h huge.h memory.h mutex.h util.h
 bump.o: bump.c bump.h chunk.h memory.h mutex.h
 chunk.o: chunk.c chunk.h extent.h memory.h mutex.h
 extent.o: extent.c bump.h extent.h mutex.h
-huge.o: huge.c chunk.h huge.h memory.h mutex.h util.h
+huge.o: huge.c arena.h chunk.h huge.h memory.h mutex.h util.h
 memory.o: memory.c memory.h
 mutex.o: mutex.c mutex.h util.h
 
