@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define CACHELINE 64
+
 // Return the smallest alignment multiple that is >= s.
 #define ALIGNMENT_CEILING(s, alignment) (((s) + (alignment - 1)) & (-(alignment)))
 

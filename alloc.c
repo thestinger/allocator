@@ -27,7 +27,6 @@
 #define thread_local _Thread_local
 #endif
 
-#define CACHELINE 64
 #define N_CLASS 32
 #define LARGE_ALIGN (sizeof(struct large))
 #define LARGE_MASK (sizeof(struct large) - 1)
