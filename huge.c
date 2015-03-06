@@ -123,32 +123,30 @@ static void huge_no_move_shrink(void *ptr, size_t old_size, size_t new_size) {
     memory_decommit(excess_addr, excess_size);
 
     struct arena *arena = get_huge_arena(ptr);
-    struct chunk_recycler *chunks = get_recycler(arena);
-    mutex_lock(&arena->mutex);
-    chunk_free(chunks, excess_addr, excess_size);
+    maybe_lock_arena(arena);
+    chunk_free(get_recycler(arena), excess_addr, excess_size);
     huge_update_size(arena, ptr, new_size);
-    mutex_unlock(&arena->mutex);
+    maybe_unlock_arena(arena);
 }
 
 static bool huge_no_move_expand(void *ptr, size_t old_size, size_t new_size) {
+    bool failure = true;
     void *expand_addr = (char *)ptr + old_size;
     size_t expand_size = new_size - old_size;
 
     struct arena *arena = get_huge_arena(ptr);
     struct chunk_recycler *chunks = get_recycler(arena);
-    mutex_lock(&arena->mutex);
+    maybe_lock_arena(arena);
     if (chunk_recycle(chunks, expand_addr, expand_size, CHUNK_SIZE)) {
         if (unlikely(memory_commit(expand_addr, expand_size))) {
             chunk_free(chunks, expand_addr, expand_size);
-            mutex_unlock(&arena->mutex);
-            return NULL;
+        } else {
+            huge_update_size(arena, ptr, new_size);
+            failure = false;
         }
-        huge_update_size(arena, ptr, new_size);
-        mutex_unlock(&arena->mutex);
-        return false;
     }
-    mutex_unlock(&arena->mutex);
-    return true;
+    maybe_unlock_arena(arena);
+    return failure;
 }
 
 static void *huge_move_expand(struct thread_cache *cache, void *old_addr, size_t old_size, size_t new_size) {
