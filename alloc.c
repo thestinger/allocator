@@ -205,6 +205,7 @@ static bool malloc_init_slow(struct thread_cache *cache) {
             arena->partial_slab[bin].next = &arena->partial_slab[bin];
         }
         large_tree_size_addr_new(&arena->large_size_addr);
+        extent_tree_ad_new(&arena->huge);
 
         chunk_recycler_init(&arena->chunks);
         if (reserved) {

@@ -7,21 +7,45 @@
 #include "mutex.h"
 #include "util.h"
 
-static extent_tree huge;
-static mutex huge_mutex = MUTEX_INITIALIZER;
+static extent_tree huge_global;
+static mutex huge_global_mutex = MUTEX_INITIALIZER;
 static struct extent_node *huge_nodes;
 
 COLD void huge_init(void) {
-    extent_tree_ad_new(&huge);
+    extent_tree_ad_new(&huge_global);
 }
 
 static struct chunk_recycler *get_recycler(struct arena *arena) {
     return arena ? &arena->chunks : NULL;
 }
 
+static struct extent_node **get_huge_nodes(struct arena *arena) {
+    return arena ? &arena->huge_nodes : &huge_nodes;
+}
+
+static void maybe_lock_arena(struct arena *arena) {
+    if (arena) {
+        mutex_lock(&arena->mutex);
+    }
+}
+
 static void maybe_unlock_arena(struct arena *arena) {
     if (arena) {
         mutex_unlock(&arena->mutex);
+    }
+}
+
+static extent_tree *acquire_huge(struct arena *arena) {
+    if (!arena) {
+        mutex_lock(&huge_global_mutex);
+        return &huge_global;
+    }
+    return &arena->huge;
+}
+
+static void release_huge(struct arena *arena) {
+    if (!arena) {
+        mutex_unlock(&huge_global_mutex);
     }
 }
 
@@ -62,34 +86,34 @@ void *huge_alloc(struct thread_cache *cache, size_t size, size_t alignment) {
         return NULL;
     }
 
-    mutex_lock(&huge_mutex);
+    extent_tree *huge = acquire_huge(arena);
 
-    struct extent_node *node = node_alloc(&huge_nodes);
+    struct extent_node *node = node_alloc(get_huge_nodes(arena));
     if (!node) {
         chunk_free(get_recycler(arena), chunk, real_size);
-        mutex_unlock(&huge_mutex);
+        release_huge(arena);
         maybe_unlock_arena(arena);
         return NULL;
     }
     node->size = real_size;
     node->addr = chunk;
-    extent_tree_ad_insert(&huge, node);
+    extent_tree_ad_insert(huge, node);
 
-    mutex_unlock(&huge_mutex);
+    release_huge(arena);
     maybe_unlock_arena(arena);
 
     return node->addr;
 }
 
-static void huge_update_size(void *ptr, size_t new_size) {
+static void huge_update_size(struct arena *arena, void *ptr, size_t new_size) {
     struct extent_node key;
     key.addr = ptr;
 
-    mutex_lock(&huge_mutex);
-    struct extent_node *node = extent_tree_ad_search(&huge, &key);
+    extent_tree *huge = acquire_huge(arena);
+    struct extent_node *node = extent_tree_ad_search(huge, &key);
     assert(node);
     node->size = new_size;
-    mutex_unlock(&huge_mutex);
+    release_huge(arena);
 }
 
 static void huge_no_move_shrink(void *ptr, size_t old_size, size_t new_size) {
@@ -102,9 +126,8 @@ static void huge_no_move_shrink(void *ptr, size_t old_size, size_t new_size) {
     struct chunk_recycler *chunks = get_recycler(arena);
     mutex_lock(&arena->mutex);
     chunk_free(chunks, excess_addr, excess_size);
+    huge_update_size(arena, ptr, new_size);
     mutex_unlock(&arena->mutex);
-
-    huge_update_size(ptr, new_size);
 }
 
 static bool huge_no_move_expand(void *ptr, size_t old_size, size_t new_size) {
@@ -120,7 +143,7 @@ static bool huge_no_move_expand(void *ptr, size_t old_size, size_t new_size) {
             mutex_unlock(&arena->mutex);
             return NULL;
         }
-        huge_update_size(ptr, new_size);
+        huge_update_size(arena, ptr, new_size);
         mutex_unlock(&arena->mutex);
         return false;
     }
@@ -158,18 +181,24 @@ static void *huge_move_expand(struct thread_cache *cache, void *old_addr, size_t
     struct extent_node key;
     key.addr = old_addr;
 
-    mutex_lock(&huge_mutex);
-    struct extent_node *node = extent_tree_ad_search(&huge, &key);
+    struct arena *old_arena = get_huge_arena(old_addr);
+
+    extent_tree *huge = acquire_huge(old_arena);
+    struct extent_node *node = extent_tree_ad_search(huge, &key);
     assert(node);
-    extent_tree_ad_remove(&huge, node);
+    extent_tree_ad_remove(huge, node);
     node->addr = new_addr;
     node->size = new_size;
-    extent_tree_ad_insert(&huge, node);
-    mutex_unlock(&huge_mutex);
+
+    if (arena != old_arena) {
+        release_huge(old_arena);
+        huge = acquire_huge(arena);
+    }
+
+    extent_tree_ad_insert(huge, node);
+    release_huge(arena);
 
     if (!gap) {
-        struct arena *old_arena = get_huge_arena(old_addr);
-
         if (arena != old_arena && old_arena) {
             mutex_lock(&old_arena->mutex);
         }
@@ -198,36 +227,38 @@ void *huge_realloc(struct thread_cache *cache, void *ptr, size_t old_size, size_
 void huge_free(void *ptr) {
     struct extent_node *node, key;
     key.addr = ptr;
+    struct arena *arena = get_huge_arena(ptr);
 
-    mutex_lock(&huge_mutex);
-    node = extent_tree_ad_search(&huge, &key);
+    maybe_lock_arena(arena);
+    extent_tree *huge = acquire_huge(arena);
+
+    node = extent_tree_ad_search(huge, &key);
     assert(node);
     size_t size = node->size;
-    extent_tree_ad_remove(&huge, node);
-    node_free(&huge_nodes, node);
-    mutex_unlock(&huge_mutex);
+    extent_tree_ad_remove(huge, node);
+    node_free(get_huge_nodes(arena), node);
+    release_huge(arena);
+
+    chunk_free(get_recycler(arena), ptr, size);
+    maybe_unlock_arena(arena);
 
     memory_decommit(ptr, size);
-
-    struct arena *arena = get_huge_arena(ptr);
-    if (arena) {
-        mutex_lock(&arena->mutex);
-        chunk_free(&arena->chunks, ptr, size);
-        mutex_unlock(&arena->mutex);
-    } else {
-        chunk_free(NULL, ptr, size);
-    }
 }
 
 size_t huge_alloc_size(void *ptr) {
     struct extent_node key;
     key.addr = ptr;
+    struct arena *arena = get_huge_arena(ptr);
 
-    mutex_lock(&huge_mutex);
-    struct extent_node *node = extent_tree_ad_search(&huge, &key);
+    maybe_lock_arena(arena);
+    extent_tree *huge = acquire_huge(arena);
+
+    struct extent_node *node = extent_tree_ad_search(huge, &key);
     assert(node);
     size_t size = node->size;
-    mutex_unlock(&huge_mutex);
+
+    release_huge(arena);
+    maybe_unlock_arena(arena);
 
     return size;
 }

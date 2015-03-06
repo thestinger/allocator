@@ -60,6 +60,9 @@ struct arena {
     struct chunk_recycler chunks;
     void *chunks_start;
     void *chunks_end;
+
+    struct extent_node *huge_nodes;
+    extent_tree huge;
 };
 
 struct thread_cache {
