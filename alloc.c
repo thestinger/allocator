@@ -74,6 +74,7 @@ static int n_arenas = 0;
 
 static void *reserved_start;
 static void *reserved_end;
+static size_t arena_initial_va_log2;
 
 static pthread_key_t tcache_key;
 
@@ -83,9 +84,7 @@ static thread_local struct thread_cache tcache = {{NULL}, {0}, -1, true};
 struct arena *get_huge_arena(void *ptr) {
     if (ptr >= reserved_start && ptr < reserved_end) {
         size_t diff = (char *)ptr - (char *)reserved_start;
-        size_t arena_initial_va = (INITIAL_VA / n_arenas) & ~CHUNK_MASK;
-        size_t arena_index = diff / arena_initial_va;
-        return arenas + arena_index;
+        return arenas + (diff >> arena_initial_va_log2);
     }
     return NULL;
 }
@@ -181,9 +180,11 @@ static bool malloc_init_slow(struct thread_cache *cache) {
 
     struct rlimit limit;
     void *reserved = NULL;
-    size_t arena_initial_va = (INITIAL_VA / n_arenas) & ~CHUNK_MASK;
+    arena_initial_va_log2 = size_log2(INITIAL_VA / n_arenas);
+    size_t arena_initial_va = (size_t)1 << arena_initial_va_log2;
     size_t total_initial_va = arena_initial_va * n_arenas;
-    if (!getrlimit(RLIMIT_AS, &limit) && limit.rlim_cur == RLIM_INFINITY) {
+    if (arena_initial_va >= CHUNK_SIZE
+        && !getrlimit(RLIMIT_AS, &limit) && limit.rlim_cur == RLIM_INFINITY) {
         reserved = memory_map_aligned(NULL, total_initial_va, CHUNK_SIZE, false);
         if (reserved) {
             reserved_start = reserved;

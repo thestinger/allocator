@@ -2,6 +2,7 @@
 #define UTIL_H
 
 #include <assert.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #undef assert
@@ -27,6 +28,14 @@ static inline bool size_mul_overflow(size_t a, size_t b, size_t *result) {
 #else
     *result = a * b;
     return a && *result / a != b;
+#endif
+}
+
+static inline size_t size_log2(size_t x) {
+#if INTPTR_MAX == INT32_MAX
+    return 31 - __builtin_clz(x);
+#else
+    return 63 - __builtin_clzll(x);
 #endif
 }
 
