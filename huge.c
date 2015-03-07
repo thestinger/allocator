@@ -89,20 +89,18 @@ void *huge_alloc(struct thread_cache *cache, size_t size, size_t alignment) {
     extent_tree *huge = acquire_huge(arena);
 
     struct extent_node *node = node_alloc(get_huge_nodes(arena));
-    if (!node) {
+    if (unlikely(!node)) {
         chunk_free(get_recycler(arena), chunk, real_size);
-        release_huge(arena);
-        maybe_unlock_arena(arena);
-        return NULL;
+        chunk = NULL;
+    } else {
+        node->size = real_size;
+        node->addr = chunk;
+        extent_tree_ad_insert(huge, node);
     }
-    node->size = real_size;
-    node->addr = chunk;
-    extent_tree_ad_insert(huge, node);
 
     release_huge(arena);
     maybe_unlock_arena(arena);
-
-    return node->addr;
+    return chunk;
 }
 
 static void huge_update_size(struct arena *arena, void *ptr, size_t new_size) {
