@@ -21,6 +21,7 @@
 #include "huge.h"
 #include "memory.h"
 #include "mutex.h"
+#include "purge.h"
 #include "util.h"
 #include "rb.h"
 
@@ -177,6 +178,7 @@ static bool malloc_init_slow(struct thread_cache *cache) {
     memory_init();
     chunk_init();
     huge_init();
+    purge_init();
 
     struct rlimit limit;
     void *reserved = NULL;
@@ -257,7 +259,9 @@ static void *arena_chunk_alloc(struct arena *arena) {
 
 static void arena_chunk_free(struct arena *arena, void *chunk) {
     if (arena->free_chunk) {
-        memory_decommit(arena->free_chunk, CHUNK_SIZE);
+        if (purge_ratio >= 0) {
+            memory_decommit(arena->free_chunk, CHUNK_SIZE);
+        }
         if (chunk >= arena->chunks_start && chunk < arena->chunks_end) {
             chunk_free(&arena->chunks, arena->free_chunk, CHUNK_SIZE);
         } else {

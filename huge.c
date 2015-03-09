@@ -5,6 +5,7 @@
 #include "huge.h"
 #include "memory.h"
 #include "mutex.h"
+#include "purge.h"
 #include "util.h"
 
 static extent_tree huge_global;
@@ -118,7 +119,9 @@ static void huge_no_move_shrink(void *ptr, size_t old_size, size_t new_size) {
     void *excess_addr = (char *)ptr + new_size;
     size_t excess_size = old_size - new_size;
 
-    memory_decommit(excess_addr, excess_size);
+    if (purge_ratio >= 0) {
+        memory_decommit(excess_addr, excess_size);
+    }
 
     struct arena *arena = get_huge_arena(ptr);
     maybe_lock_arena(arena);
@@ -157,7 +160,9 @@ static void *huge_move_expand(struct thread_cache *cache, void *old_addr, size_t
     bool gap = true;
     if (unlikely(memory_remap_fixed(old_addr, old_size, new_addr, new_size))) {
         memcpy(new_addr, old_addr, old_size);
-        memory_decommit(old_addr, old_size);
+        if (purge_ratio >= 0) {
+            memory_decommit(old_addr, old_size);
+        }
         gap = false;
     } else {
         // Attempt to fill the virtual memory hole. The kernel should provide a flag for preserving
@@ -238,7 +243,9 @@ void huge_free(void *ptr) {
     chunk_free(get_recycler(arena), ptr, size);
     maybe_unlock_arena(arena);
 
-    memory_decommit(ptr, size);
+    if (purge_ratio >= 0) {
+        memory_decommit(ptr, size);
+    }
 }
 
 size_t huge_alloc_size(void *ptr) {
