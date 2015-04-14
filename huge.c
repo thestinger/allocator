@@ -240,12 +240,11 @@ void huge_free(void *ptr) {
     node_free(get_huge_nodes(arena), node);
     release_huge(arena);
 
-    chunk_free(get_recycler(arena), ptr, size);
-    maybe_unlock_arena(arena);
-
     if (purge_ratio >= 0) {
         memory_decommit(ptr, size);
     }
+    chunk_free(get_recycler(arena), ptr, size);
+    maybe_unlock_arena(arena);
 }
 
 size_t huge_alloc_size(void *ptr) {
