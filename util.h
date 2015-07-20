@@ -19,8 +19,12 @@
 #define EXPORT __attribute__((visibility("default")))
 #define COLD __attribute__((cold))
 
+#ifndef __has_builtin
+#define __has_builtin(x) 0
+#endif
+
 static inline bool size_mul_overflow(size_t a, size_t b, size_t *result) {
-#if defined(__clang__) || __GNUC__ >= 5
+#if __has_builtin(__builtin_umul_overflow) || __GNUC__ >= 5
 #if INTPTR_MAX == INT32_MAX
     return __builtin_umul_overflow(a, b, result);
 #else
@@ -28,7 +32,8 @@ static inline bool size_mul_overflow(size_t a, size_t b, size_t *result) {
 #endif
 #else
     *result = a * b;
-    return a && *result / a != b;
+    static const size_t mul_no_overflow = 1UL << (sizeof(size_t) * 4);
+    return (a >= mul_no_overflow || b >= mul_no_overflow) && a && SIZE_MAX / a < b;
 #endif
 }
 
