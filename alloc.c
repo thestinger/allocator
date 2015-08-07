@@ -850,7 +850,11 @@ EXPORT int posix_memalign(void **memptr, size_t alignment, size_t size) {
 }
 
 EXPORT void *aligned_alloc(size_t alignment, size_t size) {
-    assert(size / alignment * alignment == size);
+    // Comply with the semantics specified in DR460
+    if (unlikely(size % alignment)) {
+        errno = EINVAL;
+        return NULL;
+    }
     return alloc_aligned_simple(alignment, size);
 }
 
