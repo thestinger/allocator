@@ -804,7 +804,8 @@ EXPORT void *realloc(void *ptr, size_t size) {
 
     struct thread_cache *cache = &tcache;
 
-    if (!size) {
+    // Marked obsolete in DR400
+    if (unlikely(!size)) {
         deallocate(cache, ptr);
         return NULL;
     }
