@@ -812,10 +812,6 @@ EXPORT void *realloc(void *ptr, size_t size) {
 
     size_t old_size = alloc_size(ptr);
 
-    if (old_size > MAX_LARGE && size > MAX_LARGE) {
-        return huge_realloc(cache, ptr, old_size, CHUNK_CEILING(size));
-    }
-
     size_t real_size = (size + 15) & ~15;
     if (old_size == real_size) {
         return ptr;
@@ -827,6 +823,10 @@ EXPORT void *realloc(void *ptr, size_t size) {
         if (!large_realloc_no_move(ptr, old_size, real_size)) {
             return ptr;
         }
+    }
+
+    if (old_size > MAX_LARGE && size > MAX_LARGE) {
+        return huge_realloc(cache, ptr, old_size, CHUNK_CEILING(size));
     }
 
     void *new_ptr = allocate(cache, size);
