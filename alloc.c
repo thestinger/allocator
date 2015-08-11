@@ -360,7 +360,7 @@ static void slab_deallocate(struct arena *arena, struct slab *slab, struct slot 
     }
 }
 
-static void *allocate_small(struct thread_cache *cache, size_t size) {
+static inline void *allocate_small(struct thread_cache *cache, size_t size) {
     size_t bin = size2bin(size);
 
     if (unlikely(cache->dead)) {
@@ -619,7 +619,7 @@ static inline void *allocate(struct thread_cache *cache, size_t size) {
     return huge_alloc(cache, size, CHUNK_SIZE);
 }
 
-static void deallocate_small(struct thread_cache *cache, void *ptr) {
+static inline void deallocate_small(struct thread_cache *cache, void *ptr) {
     struct slot *slot = ptr;
     struct slab *slab = to_slab(slot);
     size_t size = slab->size;
