@@ -252,9 +252,14 @@ static void *arena_chunk_alloc(struct arena *arena) {
             chunk_free(&arena->chunks, chunk, CHUNK_SIZE);
             return NULL;
         }
-        return chunk;
+    } else {
+        chunk = chunk_alloc(NULL, CHUNK_SIZE, CHUNK_SIZE);
+        if (unlikely(!chunk)) {
+            return NULL;
+        }
     }
-    return chunk_alloc(NULL, CHUNK_SIZE, CHUNK_SIZE);
+    ((struct chunk *)chunk)->arena = arena - arenas;
+    return chunk;
 }
 
 static void arena_chunk_free(struct arena *arena, void *chunk) {
@@ -299,7 +304,6 @@ static void *slab_allocate(struct arena *arena, size_t size, size_t bin) {
         if (unlikely(!chunk)) {
             return NULL;
         }
-        chunk->arena = arena - arenas;
         chunk->small = true;
 
         struct slab *slab = (struct slab *)ALIGNMENT_CEILING((uintptr_t)chunk->data, SLAB_SIZE);
@@ -509,7 +513,6 @@ static void *allocate_large(struct thread_cache *cache, size_t size, size_t alig
         mutex_unlock(&arena->mutex);
         return NULL;
     }
-    chunk->arena = cache->arena_index;
     chunk->small = false;
 
     void *base = (char *)chunk + LARGE_CHUNK_HEADER;
