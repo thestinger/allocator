@@ -60,7 +60,7 @@ static void *huge_chunk_alloc(struct thread_cache *cache, size_t size, size_t al
             return NULL;
         }
     } else {
-        if (!(chunk = chunk_alloc(NULL, size, alignment))) {
+        if (unlikely(!(chunk = chunk_alloc(NULL, size, alignment)))) {
             return NULL;
         }
 

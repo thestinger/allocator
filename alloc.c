@@ -138,7 +138,7 @@ static void pick_arena(struct thread_cache *cache) {
 
 static void thread_init(struct thread_cache *cache) {
     pick_arena(cache);
-    if (!pthread_setspecific(tcache_key, cache)) {
+    if (likely(!pthread_setspecific(tcache_key, cache))) {
         cache->dead = false;
     }
 }
