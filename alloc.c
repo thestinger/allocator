@@ -400,14 +400,14 @@ static inline void *allocate_small(struct thread_cache *cache, size_t size) {
     return ptr;
 }
 
-static const struct large used_sentinel;
+static const struct large *const used_sentinel = (void *)0x1;
 
 static bool is_used(const struct large *large) {
-    return large->link_size_addr.rbn_left == &used_sentinel;
+    return large->link_size_addr.rbn_left == used_sentinel;
 }
 
 static void mark_used(struct large *large) {
-    large->link_size_addr.rbn_left = (struct large *)&used_sentinel;
+    large->link_size_addr.rbn_left = (struct large *)used_sentinel;
 }
 
 static struct large *to_head(void *ptr) {
