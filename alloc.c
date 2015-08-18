@@ -232,7 +232,7 @@ static bool malloc_init(struct thread_cache *cache) {
     return malloc_init_slow(cache);
 }
 
-struct arena *get_arena(struct thread_cache *cache) {
+inline struct arena *get_arena(struct thread_cache *cache) {
     if (unlikely(mutex_trylock(&arenas[cache->arena_index].mutex))) {
         pick_arena(cache);
         mutex_lock(&arenas[cache->arena_index].mutex);
