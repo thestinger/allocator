@@ -233,9 +233,12 @@ static bool malloc_init(struct thread_cache *cache) {
 }
 
 inline struct arena *get_arena(struct thread_cache *cache) {
-    if (unlikely(mutex_trylock(&arenas[cache->arena_index].mutex))) {
+    uintptr_t self = (uintptr_t)cache;
+    uintptr_t last = atomic_load_explicit(&arenas[cache->arena_index].owner, memory_order_relaxed);
+    if (unlikely(self != last || mutex_trylock(&arenas[cache->arena_index].mutex))) {
         pick_arena(cache);
         mutex_lock(&arenas[cache->arena_index].mutex);
+        atomic_store_explicit(&arenas[cache->arena_index].owner, self, memory_order_relaxed);
     }
     return &arenas[cache->arena_index];
 }

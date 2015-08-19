@@ -48,6 +48,9 @@ struct chunk {
 struct arena {
     alignas(CACHELINE) mutex mutex;
 
+    // last thread to allocate from the arena
+    atomic_uintptr_t owner;
+
     // intrusive singly-linked list
     struct slab *free_slab;
 
